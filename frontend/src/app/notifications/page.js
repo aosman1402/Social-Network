@@ -1,0 +1,203 @@
+"use client";
+
+import { useState, useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { formatDistanceToNow } from "date-fns";
+import toast from "react-hot-toast";
+
+export default function NotificationsPage() {
+  const router = useRouter();
+  const [notifications, setNotifications] = useState([]); // ✅ Initialize as empty array
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const checkAuth = async () => {
+      const response = await fetch("http://localhost:8081/api/check-auth", {
+        credentials: "include",
+      });
+      if (!response.ok) {
+        router.push("/login");
+        return;
+      }
+      fetchNotifications();
+    };
+    checkAuth();
+  }, [router]);
+
+  const fetchNotifications = async () => {
+    try {
+      const response = await fetch("http://localhost:8081/api/notifications", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(Array.isArray(data) ? data : []);
+      } else {
+        setNotifications([]);
+      }
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+      setNotifications([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const markAsRead = async (id) => {
+    try {
+      const response = await fetch(
+        "http://localhost:8081/api/notifications/read",
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({ notification_id: id }),
+        },
+      );
+      if (response.ok) {
+        setNotifications((prev) =>
+          prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
+        );
+      }
+    } catch (error) {
+      console.error("Error marking notification as read:", error);
+    }
+  };
+
+  const markAllAsRead = async () => {
+    try {
+      const response = await fetch(
+        "http://localhost:8081/api/notifications/read-all",
+        {
+          method: "PUT",
+          credentials: "include",
+        },
+      );
+      if (response.ok) {
+        setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
+        toast.success("All notifications marked as read");
+      }
+    } catch (error) {
+      console.error("Error marking all as read:", error);
+      toast.error("Failed to mark all as read");
+    }
+  };
+
+  const getNotificationIcon = (type) => {
+    switch (type) {
+      case "follow_request":
+      case "follow_accepted":
+        return "👤";
+      case "group_invitation":
+        return "👥";
+      case "group_request":
+        return "📩";
+      case "group_request_accepted":
+        return "✅";
+      case "event_created":
+        return "📅";
+      case "comment":
+        return "💬";
+      case "like":
+        return "❤️";
+      default:
+        return "🔔";
+    }
+  };
+
+  // ✅ Safe check for unread count
+  const unreadCount = Array.isArray(notifications)
+    ? notifications.filter((n) => !n.is_read).length
+    : 0;
+
+  if (loading) {
+    return (
+      <div className='flex justify-center items-center h-64'>
+        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+      </div>
+    );
+  }
+
+  return (
+    <div className='max-w-3xl mx-auto py-4 px-4'>
+      <div className='bg-white rounded-lg shadow'>
+        <div className='p-4 border-b flex items-center justify-between'>
+          <div className='flex items-center space-x-3'>
+            <h1 className='text-2xl font-bold'>Notifications</h1>
+            {unreadCount > 0 && (
+              <span className='bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full'>
+                {unreadCount} new
+              </span>
+            )}
+          </div>
+          {unreadCount > 0 && (
+            <button
+              onClick={markAllAsRead}
+              className='text-sm text-blue-500 hover:text-blue-700'>
+              Mark all as read
+            </button>
+          )}
+        </div>
+
+        <div className='divide-y'>
+          {!notifications || notifications.length === 0 ? (
+            <div className='p-8 text-center text-gray-500'>
+              <p className='text-4xl mb-2'>🔔</p>
+              <p>No notifications yet</p>
+            </div>
+          ) : (
+            notifications.map((notification) => (
+              <div
+                key={notification.id}
+                className={`p-4 hover:bg-gray-50 cursor-pointer transition ${
+                  !notification.is_read ? "bg-blue-50" : ""
+                }`}
+                onClick={() => {
+                  if (!notification.is_read) {
+                    markAsRead(notification.id);
+                  }
+                  // Navigate based on type
+                  switch (notification.type) {
+                    case "follow_request":
+                    case "follow_accepted":
+                      router.push(`/profile/${notification.related_id}`);
+                      break;
+                    case "group_invitation":
+                    case "group_request_accepted":
+                      router.push(`/groups/${notification.related_id}`);
+                      break;
+                    case "event_created":
+                      router.push(`/groups/${notification.related_id}`);
+                      break;
+                    default:
+                      break;
+                  }
+                }}>
+                <div className='flex items-start space-x-3'>
+                  <div className='text-2xl'>
+                    {getNotificationIcon(notification.type)}
+                  </div>
+                  <div className='flex-1'>
+                    <p className={!notification.is_read ? "font-semibold" : ""}>
+                      {notification.content}
+                    </p>
+                    <p className='text-sm text-gray-400 mt-1'>
+                      {formatDistanceToNow(new Date(notification.created_at), {
+                        addSuffix: true,
+                      })}
+                    </p>
+                  </div>
+                  {!notification.is_read && (
+                    <div className='w-2 h-2 mt-2 bg-blue-500 rounded-full flex-shrink-0'></div>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
