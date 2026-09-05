@@ -222,6 +222,7 @@ export default function RegisterPage() {
             <input
               type='password'
               name='password'
+              autoComplete='new-password'
               value={formData.password}
               onChange={handleChange}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${
@@ -241,6 +242,7 @@ export default function RegisterPage() {
             <input
               type='password'
               name='confirmPassword'
+              autoComplete='new-password'
               value={formData.confirmPassword}
               onChange={handleChange}
               className={`w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 ${

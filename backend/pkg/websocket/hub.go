@@ -59,7 +59,12 @@ func (h *Hub) Run() {
             h.mutex.Unlock()
 
         case message := <-h.Broadcast:
-            h.mutex.RLock()
+            // Lock, not RLock: a full send buffer below closes and deletes
+            // the client, which is a write. RLock only excludes writers
+            // from readers - it does not stop two RLock holders (e.g. this
+            // case and a concurrent BroadcastToRoom call) from both trying
+            // to mutate the map at once.
+            h.mutex.Lock()
             for client := range h.Clients {
                 select {
                 case client.Send <- message:
@@ -68,13 +73,14 @@ func (h *Hub) Run() {
                     delete(h.Clients, client)
                 }
             }
-            h.mutex.RUnlock()
+            h.mutex.Unlock()
         }
     }
 }
 
 func (h *Hub) BroadcastToRoom(roomID string, message []byte) {
-    h.mutex.RLock()
+    // Lock, not RLock - see the comment in Run()'s Broadcast case.
+    h.mutex.Lock()
     if clients, ok := h.Rooms[roomID]; ok {
         for client := range clients {
             select {
@@ -85,7 +91,7 @@ func (h *Hub) BroadcastToRoom(roomID string, message []byte) {
             }
         }
     }
-    h.mutex.RUnlock()
+    h.mutex.Unlock()
 }
 
 func (h *Hub) GetClientsInRoom(roomID string) []*Client {

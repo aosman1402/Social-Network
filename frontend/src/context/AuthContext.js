@@ -13,8 +13,8 @@ export function AuthProvider({ children }) {
       const response = await fetch("http://localhost:8081/api/check-auth", {
         credentials: "include",
       });
-      if (response.ok) {
-        const data = await response.json();
+      const data = await response.json();
+      if (data.authenticated) {
         setUser(data);
         return data;
       } else {

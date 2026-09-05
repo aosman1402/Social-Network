@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import toast from "react-hot-toast";
+import { toast } from "@/context/ToastContext";
 
 export default function FollowButton({
   userId,

@@ -2,8 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { formatDistanceToNow } from "date-fns";
-import toast from "react-hot-toast";
+import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
+import { toast } from "@/context/ToastContext";
 
 export default function PostCard({ post, onUpdate, onDelete }) {
   const { user } = useAuth();
@@ -22,16 +22,6 @@ export default function PostCard({ post, onUpdate, onDelete }) {
   const [saved, setSaved] = useState(post.is_saved || false);
   const [imageError, setImageError] = useState(false);
   const isOwnPost = user?.id === post.user_id;
-
-  // Debug: Log when component renders
-  console.log(
-    "PostCard rendered - Post ID:",
-    post.id,
-    "Like Count:",
-    likeCount,
-    "Liked:",
-    liked,
-  );
 
   const fetchComments = async () => {
     setLoadingComments(true);

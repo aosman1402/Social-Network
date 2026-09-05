@@ -3,7 +3,6 @@ package handlers
 import (
     "database/sql"
     "encoding/json"
-    "log"
     "net/http"
     "strconv"
     "time"
@@ -15,9 +14,24 @@ import (
     gorilla "github.com/gorilla/websocket"
 )
 
+// websocketAllowedOrigins mirrors the CORS allowlist in server.go. The
+// WebSocket handshake isn't covered by ordinary CORS/preflight checks, so
+// the upgrader has to validate Origin itself instead of accepting any
+// connection.
+var websocketAllowedOrigins = map[string]bool{
+    "http://localhost:3000": true,
+    "http://localhost:3001": true,
+    "http://127.0.0.1:3000": true,
+    "http://127.0.0.1:3001": true,
+}
+
 var upgrader = gorilla.Upgrader{
     CheckOrigin: func(r *http.Request) bool {
-        return true
+        origin := r.Header.Get("Origin")
+        // No Origin header at all means a non-browser client (e.g. a
+        // native app or a test script), which CORS/Origin checks don't
+        // apply to in the first place.
+        return origin == "" || websocketAllowedOrigins[origin]
     },
     ReadBufferSize:  1024,
     WriteBufferSize: 1024,
@@ -28,30 +42,63 @@ type WebSocketHandler struct {
     Hub *websocket.Hub
 }
 
+// ChatMessage represents a chat message
+type ChatMessage struct {
+    ID             int64        `json:"id"`
+    SenderID       int64        `json:"sender_id"`
+    RecipientID    *int64       `json:"recipient_id,omitempty"`
+    GroupID        *int64       `json:"group_id,omitempty"`
+    Content        string       `json:"content"`
+    IsGroupMessage bool         `json:"is_group_message"`
+    CreatedAt      time.Time    `json:"created_at"`
+    Sender         *models.User `json:"sender,omitempty"`
+}
+
+// Notification represents a notification
+type Notification struct {
+    ID        int64     `json:"id"`
+    UserID    int64     `json:"user_id"`
+    Type      string    `json:"type"`
+    Content   string    `json:"content"`
+    IsRead    bool      `json:"is_read"`
+    RelatedID *int64    `json:"related_id,omitempty"`
+    CreatedAt time.Time `json:"created_at"`
+}
+
 // HandleWebSocket - Handle WebSocket connections
 func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Request) {
-    // Get token from query parameter
-    token := r.URL.Query().Get("token")
-    
-    // If no token in query, try cookie
-    if token == "" {
-        cookie, err := r.Cookie("session_token")
-        if err != nil {
-            http.Error(w, "Unauthorized - No token", http.StatusUnauthorized)
-            return
-        }
-        token = cookie.Value
+    origin := r.Header.Get("Origin")
+    if websocketAllowedOrigins[origin] {
+        w.Header().Set("Access-Control-Allow-Origin", origin)
+        w.Header().Set("Access-Control-Allow-Credentials", "true")
     }
+    w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+    w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Cookie, Set-Cookie, Upgrade, Connection")
+    w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
+
+    if r.Method == "OPTIONS" {
+        w.WriteHeader(http.StatusOK)
+        return
+    }
+
+    // Session cookie only - no query-string token fallback, which would
+    // otherwise leak the session token into URLs (server logs, browser
+    // history, proxies).
+    cookie, err := r.Cookie("session_token")
+    if err != nil {
+        http.Error(w, "Unauthorized - No token", http.StatusUnauthorized)
+        return
+    }
+    token := cookie.Value
 
     if token == "" {
         http.Error(w, "Unauthorized - Empty token", http.StatusUnauthorized)
         return
     }
 
-    // Validate token
     var userID int64
     var expiresAt time.Time
-    err := wsh.DB.QueryRow(
+    err = wsh.DB.QueryRow(
         "SELECT user_id, expires_at FROM sessions WHERE session_token = ?",
         token,
     ).Scan(&userID, &expiresAt)
@@ -66,14 +113,12 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
         return
     }
 
-    // Upgrade to WebSocket
     conn, err := upgrader.Upgrade(w, r, nil)
     if err != nil {
-        log.Printf("Failed to upgrade connection: %v", err)
+        http.Error(w, "Failed to upgrade connection", http.StatusInternalServerError)
         return
     }
 
-    // Get user info
     var user models.User
     err = wsh.DB.QueryRow(
         `SELECT id, email, first_name, last_name, nickname, avatar_path 
@@ -82,10 +127,10 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
     ).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname, &user.AvatarPath)
     if err != nil {
         conn.Close()
+        http.Error(w, "User not found", http.StatusNotFound)
         return
     }
 
-    // Create client
     client := &websocket.Client{
         Hub:      wsh.Hub,
         Conn:     conn,
@@ -98,6 +143,7 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
     }
 
     wsh.Hub.Register <- client
+
     go client.WritePump()
     go client.ReadPump(wsh.DB)
 }
@@ -106,8 +152,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
 func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)
 
-    rows, err := wsh.DB.Query(`
-        SELECT DISTINCT 
+    rows, err := wsh.DB.Query(
+        `SELECT DISTINCT 
             CASE 
                 WHEN m.sender_id = ? THEN m.recipient_id
                 ELSE m.sender_id
@@ -119,13 +165,15 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
             (SELECT created_at FROM messages 
              WHERE (sender_id = ? AND recipient_id = other_user_id) 
                 OR (sender_id = other_user_id AND recipient_id = ?)
-             ORDER BY created_at DESC LIMIT 1) as last_message_at
+             ORDER BY created_at DESC LIMIT 1) as last_message_at,
+            (SELECT COUNT(*) FROM messages 
+             WHERE sender_id = other_user_id AND recipient_id = ? AND read_at IS NULL) as unread_count
          FROM messages m
          WHERE m.sender_id = ? OR m.recipient_id = ?
          GROUP BY other_user_id
-         ORDER BY last_message_at DESC
-    `, userID, userID, userID, userID, userID, userID)
-
+         ORDER BY last_message_at DESC`,
+        userID, userID, userID, userID, userID, userID, userID, userID,
+    )
     if err != nil {
         http.Error(w, "Failed to get chats", http.StatusInternalServerError)
         return
@@ -137,8 +185,8 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
         var otherUserID int64
         var lastMessage sql.NullString
         var lastMessageAt sql.NullTime
-
-        err := rows.Scan(&otherUserID, &lastMessage, &lastMessageAt)
+        var unreadCount int
+        err := rows.Scan(&otherUserID, &lastMessage, &lastMessageAt, &unreadCount)
         if err != nil {
             continue
         }
@@ -151,9 +199,11 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
         ).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname, &user.AvatarPath, &user.IsPublic)
 
         chats = append(chats, map[string]interface{}{
+            "other_user_id":   otherUserID,
             "other_user":      user,
             "last_message":    lastMessage.String,
             "last_message_at": lastMessageAt.Time,
+            "unread_count":    unreadCount,
         })
     }
 
@@ -176,6 +226,31 @@ func (wsh *WebSocketHandler) GetChatHistory(w http.ResponseWriter, r *http.Reque
         return
     }
 
+    // Check if users can chat
+    var count int
+    err = wsh.DB.QueryRow(
+        `SELECT COUNT(*) FROM follows 
+         WHERE (follower_id = ? AND following_id = ? AND status = 'accepted')
+         OR (follower_id = ? AND following_id = ? AND status = 'accepted')`,
+        userID, otherUserID, otherUserID, userID,
+    ).Scan(&count)
+
+    if err != nil {
+        http.Error(w, "Database error", http.StatusInternalServerError)
+        return
+    }
+
+    var isPublic bool
+    wsh.DB.QueryRow(
+        "SELECT is_public FROM users WHERE id = ?",
+        otherUserID,
+    ).Scan(&isPublic)
+
+    if count == 0 && !isPublic {
+        http.Error(w, "Cannot chat with this user", http.StatusForbidden)
+        return
+    }
+
     rows, err := wsh.DB.Query(
         `SELECT m.id, m.sender_id, m.content, m.created_at,
                 u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path
@@ -183,7 +258,7 @@ func (wsh *WebSocketHandler) GetChatHistory(w http.ResponseWriter, r *http.Reque
          JOIN users u ON m.sender_id = u.id
          WHERE (m.sender_id = ? AND m.recipient_id = ?)
             OR (m.sender_id = ? AND m.recipient_id = ?)
-         ORDER BY m.created_at ASC
+         ORDER BY m.created_at DESC
          LIMIT 50`,
         userID, otherUserID, otherUserID, userID,
     )
@@ -193,16 +268,10 @@ func (wsh *WebSocketHandler) GetChatHistory(w http.ResponseWriter, r *http.Reque
     }
     defer rows.Close()
 
-    var messages []map[string]interface{}
+    var messages []ChatMessage
     for rows.Next() {
-        var msg struct {
-            ID        int64
-            SenderID  int64
-            Content   string
-            CreatedAt time.Time
-        }
+        var msg ChatMessage
         var sender models.User
-
         err := rows.Scan(
             &msg.ID, &msg.SenderID, &msg.Content, &msg.CreatedAt,
             &sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.AvatarPath,
@@ -210,14 +279,9 @@ func (wsh *WebSocketHandler) GetChatHistory(w http.ResponseWriter, r *http.Reque
         if err != nil {
             continue
         }
-
-        messages = append(messages, map[string]interface{}{
-            "id":         msg.ID,
-            "sender_id":  msg.SenderID,
-            "content":    msg.Content,
-            "created_at": msg.CreatedAt,
-            "sender":     sender,
-        })
+        msg.Sender = &sender
+        msg.RecipientID = &otherUserID
+        messages = append(messages, msg)
     }
 
     if err = rows.Err(); err != nil {
@@ -228,7 +292,7 @@ func (wsh *WebSocketHandler) GetChatHistory(w http.ResponseWriter, r *http.Reque
     json.NewEncoder(w).Encode(messages)
 }
 
-// SendMessage - Send a private message
+// SendMessage - Send a message via HTTP
 func (wsh *WebSocketHandler) SendMessage(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)
 
@@ -247,11 +311,36 @@ func (wsh *WebSocketHandler) SendMessage(w http.ResponseWriter, r *http.Request)
         return
     }
 
+    // Check if users can chat
+    var count int
+    err := wsh.DB.QueryRow(
+        `SELECT COUNT(*) FROM follows 
+         WHERE (follower_id = ? AND following_id = ? AND status = 'accepted')
+         OR (follower_id = ? AND following_id = ? AND status = 'accepted')`,
+        userID, req.RecipientID, req.RecipientID, userID,
+    ).Scan(&count)
+
+    if err != nil {
+        http.Error(w, "Database error", http.StatusInternalServerError)
+        return
+    }
+
+    var isPublic bool
+    wsh.DB.QueryRow(
+        "SELECT is_public FROM users WHERE id = ?",
+        req.RecipientID,
+    ).Scan(&isPublic)
+
+    if count == 0 && !isPublic {
+        http.Error(w, "Cannot message this user", http.StatusForbidden)
+        return
+    }
+
     // Save message
     result, err := wsh.DB.Exec(
-        `INSERT INTO messages (sender_id, recipient_id, content, created_at)
-         VALUES (?, ?, ?, ?)`,
-        userID, req.RecipientID, req.Content, time.Now(),
+        `INSERT INTO messages (sender_id, recipient_id, content, is_group_message, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        userID, req.RecipientID, req.Content, false, time.Now(),
     )
     if err != nil {
         http.Error(w, "Failed to save message", http.StatusInternalServerError)
@@ -261,15 +350,20 @@ func (wsh *WebSocketHandler) SendMessage(w http.ResponseWriter, r *http.Request)
     messageID, _ := result.LastInsertId()
 
     // Get sender info
-    var sender models.User
+    var sender struct {
+        ID        int64  `json:"id"`
+        FirstName string `json:"first_name"`
+        LastName  string `json:"last_name"`
+        Nickname  string `json:"nickname"`
+        Avatar    string `json:"avatar_path"`
+    }
     wsh.DB.QueryRow(
-        `SELECT id, email, first_name, last_name, nickname, avatar_path 
-         FROM users WHERE id = ?`,
+        `SELECT id, first_name, last_name, nickname, avatar_path FROM users WHERE id = ?`,
         userID,
-    ).Scan(&sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.AvatarPath)
+    ).Scan(&sender.ID, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.Avatar)
 
     // Create message response
-    message := map[string]interface{}{
+    response := map[string]interface{}{
         "id":           messageID,
         "sender_id":    userID,
         "recipient_id": req.RecipientID,
@@ -278,123 +372,30 @@ func (wsh *WebSocketHandler) SendMessage(w http.ResponseWriter, r *http.Request)
         "sender":       sender,
     }
 
-    // Send via WebSocket if recipient is online
+    // Try to send via WebSocket. Routed through Hub.BroadcastToRoom rather
+    // than reaching into wsh.Hub.Rooms directly - that map is mutated
+    // (under lock) by the Hub's own goroutine on every connect/disconnect,
+    // so reading it here without going through the same lock would be a
+    // data race.
     roomID := "user_" + strconv.FormatInt(req.RecipientID, 10)
-    data, _ := json.Marshal(message)
+    data, _ := json.Marshal(response)
     wsMsg := map[string]interface{}{
         "type": "chat",
         "data": json.RawMessage(data),
     }
     msgBytes, _ := json.Marshal(wsMsg)
+    wsh.Hub.BroadcastToRoom(roomID, msgBytes)
 
-    if clients, ok := wsh.Hub.Rooms[roomID]; ok {
-        for client := range clients {
-            select {
-            case client.Send <- msgBytes:
-            default:
-                // Skip if buffer is full
-            }
-        }
-    }
-
+    w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(map[string]interface{}{
         "message":    "Message sent",
         "message_id": messageID,
-        "data":       message,
+        "data":       response,
     })
 }
 
-// SendGroupMessage - Send a message to a group
-func (wsh *WebSocketHandler) SendGroupMessage(w http.ResponseWriter, r *http.Request) {
-    userID, _ := middleware.GetUserID(r)
-
-    var req struct {
-        GroupID int64  `json:"group_id"`
-        Content string `json:"content"`
-    }
-
-    if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-        http.Error(w, "Invalid request body", http.StatusBadRequest)
-        return
-    }
-
-    if req.Content == "" {
-        http.Error(w, "Content is required", http.StatusBadRequest)
-        return
-    }
-
-    // Check if user is a member
-    var count int
-    err := wsh.DB.QueryRow(
-        "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
-        req.GroupID, userID,
-    ).Scan(&count)
-
-    if err != nil || count == 0 {
-        http.Error(w, "You are not a member of this group", http.StatusForbidden)
-        return
-    }
-
-    // Save message
-    result, err := wsh.DB.Exec(
-        `INSERT INTO messages (sender_id, group_id, content, is_group_message, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        userID, req.GroupID, req.Content, true, time.Now(),
-    )
-    if err != nil {
-        http.Error(w, "Failed to save message", http.StatusInternalServerError)
-        return
-    }
-
-    messageID, _ := result.LastInsertId()
-
-    // Get sender info
-    var sender models.User
-    wsh.DB.QueryRow(
-        `SELECT id, email, first_name, last_name, nickname, avatar_path 
-         FROM users WHERE id = ?`,
-        userID,
-    ).Scan(&sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.AvatarPath)
-
-    // Create message response
-    message := map[string]interface{}{
-        "id":               messageID,
-        "sender_id":        userID,
-        "group_id":         req.GroupID,
-        "content":          req.Content,
-        "created_at":       time.Now(),
-        "sender":           sender,
-        "is_group_message": true,
-    }
-
-    // Send via WebSocket to all group members
-    roomID := "group_" + strconv.FormatInt(req.GroupID, 10)
-    data, _ := json.Marshal(message)
-    wsMsg := map[string]interface{}{
-        "type": "chat",
-        "data": json.RawMessage(data),
-    }
-    msgBytes, _ := json.Marshal(wsMsg)
-
-    if clients, ok := wsh.Hub.Rooms[roomID]; ok {
-        for client := range clients {
-            select {
-            case client.Send <- msgBytes:
-            default:
-                // Skip if buffer is full
-            }
-        }
-    }
-
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "message":    "Message sent",
-        "message_id": messageID,
-        "data":       message,
-    })
-}
-
-// GetGroupMessages - Get message history for a group
-func (wsh *WebSocketHandler) GetGroupMessages(w http.ResponseWriter, r *http.Request) {
+// GetGroupChatHistory - Get chat history for a group
+func (wsh *WebSocketHandler) GetGroupChatHistory(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)
 
     groupIDStr := r.URL.Query().Get("group_id")
@@ -404,7 +405,6 @@ func (wsh *WebSocketHandler) GetGroupMessages(w http.ResponseWriter, r *http.Req
         return
     }
 
-    // Check if user is a member
     var count int
     err = wsh.DB.QueryRow(
         "SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
@@ -421,26 +421,20 @@ func (wsh *WebSocketHandler) GetGroupMessages(w http.ResponseWriter, r *http.Req
          FROM messages m
          JOIN users u ON m.sender_id = u.id
          WHERE m.group_id = ?
-         ORDER BY m.created_at ASC
+         ORDER BY m.created_at DESC
          LIMIT 50`,
         groupID,
     )
     if err != nil {
-        http.Error(w, "Failed to get group messages", http.StatusInternalServerError)
+        http.Error(w, "Failed to get group chat history", http.StatusInternalServerError)
         return
     }
     defer rows.Close()
 
-    var messages []map[string]interface{}
+    var messages []ChatMessage
     for rows.Next() {
-        var msg struct {
-            ID        int64
-            SenderID  int64
-            Content   string
-            CreatedAt time.Time
-        }
+        var msg ChatMessage
         var sender models.User
-
         err := rows.Scan(
             &msg.ID, &msg.SenderID, &msg.Content, &msg.CreatedAt,
             &sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.AvatarPath,
@@ -448,15 +442,10 @@ func (wsh *WebSocketHandler) GetGroupMessages(w http.ResponseWriter, r *http.Req
         if err != nil {
             continue
         }
-
-        messages = append(messages, map[string]interface{}{
-            "id":          msg.ID,
-            "sender_id":   msg.SenderID,
-            "content":     msg.Content,
-            "created_at":  msg.CreatedAt,
-            "sender":      sender,
-            "is_group_message": true,
-        })
+        msg.Sender = &sender
+        msg.GroupID = &groupID
+        msg.IsGroupMessage = true
+        messages = append(messages, msg)
     }
 
     if err = rows.Err(); err != nil {
@@ -465,54 +454,6 @@ func (wsh *WebSocketHandler) GetGroupMessages(w http.ResponseWriter, r *http.Req
     }
 
     json.NewEncoder(w).Encode(messages)
-}
-
-// ============================================
-// ✅ NOTIFICATION METHODS - ONLY ONCE
-// ============================================
-
-// SendNotification - Send a notification to a user
-func (wsh *WebSocketHandler) SendNotification(db *sql.DB, userID int64, notificationType string, content string, relatedID *int64) error {
-    result, err := db.Exec(
-        `INSERT INTO notifications (user_id, type, content, related_id, created_at, is_read)
-         VALUES (?, ?, ?, ?, ?, ?)`,
-        userID, notificationType, content, relatedID, time.Now(), false,
-    )
-    if err != nil {
-        return err
-    }
-
-    notificationID, _ := result.LastInsertId()
-
-    notification := map[string]interface{}{
-        "id":         notificationID,
-        "user_id":    userID,
-        "type":       notificationType,
-        "content":    content,
-        "related_id": relatedID,
-        "created_at": time.Now(),
-        "is_read":    false,
-    }
-
-    // Send to user if online via WebSocket
-    roomID := "user_" + strconv.FormatInt(userID, 10)
-    if clients, ok := wsh.Hub.Rooms[roomID]; ok {
-        data, _ := json.Marshal(notification)
-        wsMsg := map[string]interface{}{
-            "type": "notification",
-            "data": json.RawMessage(data),
-        }
-        msgBytes, _ := json.Marshal(wsMsg)
-        for client := range clients {
-            select {
-            case client.Send <- msgBytes:
-            default:
-                // Skip if buffer is full
-            }
-        }
-    }
-
-    return nil
 }
 
 // GetNotifications - Get user notifications
@@ -533,28 +474,15 @@ func (wsh *WebSocketHandler) GetNotifications(w http.ResponseWriter, r *http.Req
     }
     defer rows.Close()
 
-    var notifications []map[string]interface{}
+    var notifications []Notification
     for rows.Next() {
-        var id int64
-        var notifType string
-        var content string
-        var isRead bool
-        var relatedID sql.NullInt64
-        var createdAt time.Time
-
-        err := rows.Scan(&id, &notifType, &content, &isRead, &relatedID, &createdAt)
+        var n Notification
+        err := rows.Scan(&n.ID, &n.Type, &n.Content, &n.IsRead, &n.RelatedID, &n.CreatedAt)
         if err != nil {
             continue
         }
-
-        notifications = append(notifications, map[string]interface{}{
-            "id":         id,
-            "type":       notifType,
-            "content":    content,
-            "is_read":    isRead,
-            "related_id": relatedID.Int64,
-            "created_at": createdAt,
-        })
+        n.UserID = userID
+        notifications = append(notifications, n)
     }
 
     if err = rows.Err(); err != nil {
@@ -578,18 +506,12 @@ func (wsh *WebSocketHandler) MarkNotificationAsRead(w http.ResponseWriter, r *ht
         return
     }
 
-    result, err := wsh.DB.Exec(
+    _, err := wsh.DB.Exec(
         "UPDATE notifications SET is_read = true WHERE id = ? AND user_id = ?",
         req.NotificationID, userID,
     )
     if err != nil {
-        http.Error(w, "Failed to mark notification as read: "+err.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    rowsAffected, _ := result.RowsAffected()
-    if rowsAffected == 0 {
-        http.Error(w, "Notification not found", http.StatusNotFound)
+        http.Error(w, "Failed to mark notification as read", http.StatusInternalServerError)
         return
     }
 
@@ -607,7 +529,7 @@ func (wsh *WebSocketHandler) MarkAllNotificationsAsRead(w http.ResponseWriter, r
         userID,
     )
     if err != nil {
-        http.Error(w, "Failed to mark notifications as read: "+err.Error(), http.StatusInternalServerError)
+        http.Error(w, "Failed to mark notifications as read", http.StatusInternalServerError)
         return
     }
 
@@ -626,7 +548,7 @@ func (wsh *WebSocketHandler) GetUnreadCount(w http.ResponseWriter, r *http.Reque
         userID,
     ).Scan(&count)
     if err != nil {
-        http.Error(w, "Failed to get unread count: "+err.Error(), http.StatusInternalServerError)
+        http.Error(w, "Failed to get unread count", http.StatusInternalServerError)
         return
     }
 

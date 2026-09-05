@@ -2,12 +2,16 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import { toast } from "@/context/ToastContext";
 
 export default function SettingsPage() {
   const router = useRouter();
+  const { user, setUser } = useAuth();
   const [activeTab, setActiveTab] = useState("profile");
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
   // Profile settings
   const [profile, setProfile] = useState({
@@ -34,6 +38,51 @@ export default function SettingsPage() {
     messages: true,
     groups: true,
   });
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const validTypes = ["image/jpeg", "image/png", "image/gif"];
+    if (!validTypes.includes(file.type)) {
+      toast.error("Please upload a valid image (JPEG, PNG, or GIF)");
+      e.target.value = "";
+      return;
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error("Image size must be less than 5MB");
+      e.target.value = "";
+      return;
+    }
+
+    setUploadingAvatar(true);
+    try {
+      const formData = new FormData();
+      formData.append("avatar", file);
+
+      const response = await fetch("http://localhost:8081/api/user/avatar", {
+        method: "POST",
+        credentials: "include",
+        body: formData,
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        toast.error(data.error || "Failed to update avatar");
+        return;
+      }
+
+      setUser((prev) => (prev ? { ...prev, avatar_path: data.avatar_path } : prev));
+      toast.success("Profile picture updated!");
+    } catch (error) {
+      console.error("Error uploading avatar:", error);
+      toast.error("Failed to update avatar");
+    } finally {
+      setUploadingAvatar(false);
+      e.target.value = "";
+    }
+  };
 
   const handleProfileChange = (e) => {
     const { name, value, type, checked } = e.target;
@@ -65,22 +114,48 @@ export default function SettingsPage() {
     }, 1000);
   };
 
-  const handlePasswordSubmit = (e) => {
+  const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     if (password.new !== password.confirm) {
       setMessage("Passwords do not match");
+      return;
+    }
+    if (password.new.length < 8) {
+      setMessage("New password must be at least 8 characters");
       return;
     }
 
     setIsLoading(true);
     setMessage("");
 
-    // Simulate API call
-    setTimeout(() => {
-      setMessage("Password changed successfully!");
+    try {
+      const response = await fetch("http://localhost:8081/api/user/password", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          current_password: password.current,
+          new_password: password.new,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(data.error || "Failed to change password");
+        return;
+      }
+
       setPassword({ current: "", new: "", confirm: "" });
+      // Changing the password invalidates every session, including this
+      // one - the user has to log in again with the new password.
+      router.push("/login");
+    } catch (error) {
+      console.error("Error changing password:", error);
+      setMessage("Failed to change password");
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handleNotificationSubmit = (e) => {
@@ -155,6 +230,30 @@ export default function SettingsPage() {
             {activeTab === "profile" && (
               <form onSubmit={handleProfileSubmit} className='space-y-4'>
                 <h2 className='text-lg font-semibold'>Profile Information</h2>
+
+                <div className='flex items-center gap-4'>
+                  {user?.avatar_path ? (
+                    <img
+                      src={`http://localhost:8081${user.avatar_path}`}
+                      alt='Profile picture'
+                      className='w-16 h-16 rounded-full object-cover border'
+                    />
+                  ) : (
+                    <div className='w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center text-white text-xl font-bold'>
+                      {user?.first_name?.[0] || "U"}
+                    </div>
+                  )}
+                  <label className='cursor-pointer px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition'>
+                    {uploadingAvatar ? "Uploading..." : "Change Photo"}
+                    <input
+                      type='file'
+                      accept='image/jpeg,image/png,image/gif'
+                      onChange={handleAvatarChange}
+                      className='hidden'
+                      disabled={uploadingAvatar}
+                    />
+                  </label>
+                </div>
 
                 <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
                   <div>

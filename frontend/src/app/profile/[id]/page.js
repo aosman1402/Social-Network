@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import toast from "react-hot-toast";
+import { toast } from "@/context/ToastContext";
 
 export default function ProfileDetailPage() {
   const params = useParams();
@@ -64,12 +64,12 @@ export default function ProfileDetailPage() {
         const authRes = await fetch("http://localhost:8081/api/check-auth", {
           credentials: "include",
         });
+        const authData = await authRes.json();
 
-        if (!authRes.ok) {
+        if (!authData.authenticated) {
           router.push("/login");
           return;
         }
-        const authData = await authRes.json();
         setCurrentUser(authData);
 
         // Check if this is the user's own profile

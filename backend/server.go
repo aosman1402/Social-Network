@@ -5,6 +5,7 @@ import (
     "net/http"
     "os"
     "path/filepath"
+    "time"
 
     "social-network3/pkg/db/sqlite"
     "social-network3/pkg/handlers"
@@ -67,28 +68,31 @@ func main() {
     // Initialize middleware
     authMiddleware := &middleware.AuthMiddleware{DB: db.DB}
 
+    // At most 5 login attempts per minute per client IP, to slow down
+    // password brute-forcing.
+    loginRateLimiter := middleware.NewRateLimiter(5, time.Minute)
+
     // Serve static files (uploads)
     http.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
 
-    // CORS middleware
+    // CORS middleware. Fails closed: an Origin outside the allowlist gets no
+    // Access-Control-Allow-Origin header at all (rather than falling back to
+    // "*"), so the browser blocks the response instead of the server
+    // advertising open access it doesn't mean to grant.
+    allowedOrigins := map[string]bool{
+        "http://localhost:3000": true,
+        "http://localhost:3001": true,
+        "http://127.0.0.1:3000": true,
+        "http://127.0.0.1:3001": true,
+    }
     cors := func(next http.HandlerFunc) http.HandlerFunc {
         return func(w http.ResponseWriter, r *http.Request) {
-            // ✅ Allow multiple origins
             origin := r.Header.Get("Origin")
-            allowedOrigins := map[string]bool{
-                "http://localhost:3000": true,
-                "http://localhost:3001": true,
-                "http://127.0.0.1:3000": true,
-                "http://127.0.0.1:3001": true,
-            }
-            
             if allowedOrigins[origin] {
                 w.Header().Set("Access-Control-Allow-Origin", origin)
-            } else {
-                w.Header().Set("Access-Control-Allow-Origin", "*")
+                w.Header().Set("Access-Control-Allow-Credentials", "true")
             }
-            
-            w.Header().Set("Access-Control-Allow-Credentials", "true")
+
             w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
             w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Cookie, Set-Cookie")
             w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
@@ -110,13 +114,18 @@ func main() {
 
     // Auth routes
     http.HandleFunc("/api/register", cors(authHandler.Register))
-    http.HandleFunc("/api/login", cors(authHandler.Login))
+    http.HandleFunc("/api/login", cors(loginRateLimiter.Limit(authHandler.Login)))
     http.HandleFunc("/api/logout", cors(authMiddleware.Authenticate(authHandler.Logout)))
-    http.HandleFunc("/api/check-auth", cors(authMiddleware.Authenticate(authHandler.CheckAuth)))
+    http.HandleFunc("/api/user/password", cors(authMiddleware.Authenticate(authHandler.ChangePassword)))
+    // check-auth is intentionally not wrapped in authMiddleware: an
+    // unauthenticated caller is a normal case here, not a rejected request,
+    // and the handler itself reports that via a 200 {"authenticated":false}.
+    http.HandleFunc("/api/check-auth", cors(authHandler.CheckAuth))
 
     // User routes
     http.HandleFunc("/api/user/profile", cors(authMiddleware.Authenticate(userHandler.GetProfile)))
     http.HandleFunc("/api/user/update", cors(authMiddleware.Authenticate(userHandler.UpdateProfile)))
+    http.HandleFunc("/api/user/avatar", cors(authMiddleware.Authenticate(userHandler.UploadAvatar)))
     http.HandleFunc("/api/user/follow", cors(authMiddleware.Authenticate(userHandler.FollowUser)))
     http.HandleFunc("/api/user/unfollow", cors(authMiddleware.Authenticate(userHandler.UnfollowUser)))
     http.HandleFunc("/api/user/follow-request", cors(authMiddleware.Authenticate(userHandler.HandleFollowRequest)))
@@ -149,8 +158,6 @@ func main() {
     http.HandleFunc("/api/group/event/create", cors(authMiddleware.Authenticate(groupHandler.CreateEvent)))
     http.HandleFunc("/api/group/event/respond", cors(authMiddleware.Authenticate(groupHandler.RespondToEvent)))
     http.HandleFunc("/api/group/posts", cors(authMiddleware.Authenticate(groupHandler.GetGroupPosts)))
-    http.HandleFunc("/api/group/messages/send", cors(authMiddleware.Authenticate(wsHandler.SendGroupMessage)))
-    http.HandleFunc("/api/group/messages", cors(authMiddleware.Authenticate(wsHandler.GetGroupMessages)))
 
     // Chat routes
     http.HandleFunc("/api/chats", cors(authMiddleware.Authenticate(wsHandler.GetChats)))

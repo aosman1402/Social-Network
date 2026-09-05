@@ -1,51 +1,41 @@
 package handlers
 
 import (
-    "database/sql"
-    "encoding/json"
-    "fmt"
-    "io"
-    "net/http"
-    "os"
-    "path/filepath"
-    "strconv"
-    "strings"
-    "time"
+	"database/sql"
+	"encoding/json"
+	"net/http"
+	"strconv"
+	"time"
+    "log"
 
-    "social-network3/pkg/middleware"
-    "social-network3/pkg/models"
-
-    "github.com/google/uuid"
+	"social-network3/pkg/middleware"
+	"social-network3/pkg/models"
 )
 
 type PostHandler struct {
     DB *sql.DB
 }
 
-type CreatePostRequest struct {
-    Content      string  `json:"content"`
-    PrivacyLevel string  `json:"privacy_level"`
-    GroupID      *int64  `json:"group_id"`
-}
-
-type CreateCommentRequest struct {
-    Content   string  `json:"content"`
-    PostID    int64   `json:"post_id"`
-}
-
-// CreatePost - Create a new post with image and notifications
+// CreatePost - Create a new post with image
 func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)
 
-    err := r.ParseMultipartForm(10 << 20)
+    // ✅ Parse multipart form (important for image uploads)
+    err := r.ParseMultipartForm(10 << 20) // 10MB max
     if err != nil {
-        http.Error(w, "Failed to parse form", http.StatusBadRequest)
+        http.Error(w, "Failed to parse form: "+err.Error(), http.StatusBadRequest)
         return
     }
 
+    // ✅ Get form values
     content := r.FormValue("content")
     privacyLevel := r.FormValue("privacy_level")
     groupIDStr := r.FormValue("group_id")
+
+    // ✅ Debug logging
+    log.Printf("Creating post for user %d", userID)
+    log.Printf("Content: %s", content)
+    log.Printf("Privacy: %s", privacyLevel)
 
     if content == "" {
         http.Error(w, "Content is required", http.StatusBadRequest)
@@ -53,11 +43,6 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     }
 
     if privacyLevel == "" {
-        privacyLevel = "public"
-    }
-
-    // Validate privacy level
-    if privacyLevel != "public" && privacyLevel != "almost_private" && privacyLevel != "private" {
         privacyLevel = "public"
     }
 
@@ -75,50 +60,11 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     if err == nil {
         defer file.Close()
 
-        contentType := header.Header.Get("Content-Type")
-        allowedTypes := []string{"image/jpeg", "image/png", "image/gif"}
-        isValidType := false
-        for _, t := range allowedTypes {
-            if contentType == t {
-                isValidType = true
-                break
-            }
-        }
-
-        if !isValidType {
-            http.Error(w, "Invalid image type. Only JPEG, PNG, and GIF are allowed", http.StatusBadRequest)
-            return
-        }
-
-        if header.Size > 5*1024*1024 {
-            http.Error(w, "Image size must be less than 5MB", http.StatusBadRequest)
-            return
-        }
-
-        uploadDir := "./uploads"
-        if err := os.MkdirAll(uploadDir, 0755); err != nil {
-            http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
-            return
-        }
-
-        ext := filepath.Ext(header.Filename)
-        filename := uuid.New().String() + ext
-        filePath := filepath.Join(uploadDir, filename)
-
-        out, err := os.Create(filePath)
+        imagePath, err = saveUploadedImage(file, header, 5*1024*1024)
         if err != nil {
-            http.Error(w, "Failed to save image", http.StatusInternalServerError)
+            imageUploadErrorResponse(w, err)
             return
         }
-        defer out.Close()
-
-        _, err = io.Copy(out, file)
-        if err != nil {
-            http.Error(w, "Failed to save image", http.StatusInternalServerError)
-            return
-        }
-
-        imagePath = "/uploads/" + filename
     }
 
     // Insert post
@@ -150,26 +96,6 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
         "SELECT id, email, first_name, last_name, nickname, avatar_path FROM users WHERE id = ?",
         userID,
     ).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname, &user.AvatarPath)
-
-    // ✅ Send notifications to followers for public posts
-    if privacyLevel == "public" {
-        rows, err := ph.DB.Query(
-            "SELECT follower_id FROM follows WHERE following_id = ? AND status = 'accepted'",
-            userID,
-        )
-        if err == nil {
-            defer rows.Close()
-            for rows.Next() {
-                var followerID int64
-                rows.Scan(&followerID)
-                ph.DB.Exec(
-                    `INSERT INTO notifications (user_id, type, content, related_id, created_at, is_read)
-                     VALUES (?, 'post', ?, ?, ?, ?)`,
-                    followerID, user.FirstName+" created a new post", postID, time.Now(), false,
-                )
-            }
-        }
-    }
 
     var commentCount int
     ph.DB.QueryRow("SELECT COUNT(*) FROM comments WHERE post_id = ?", postID).Scan(&commentCount)
@@ -274,371 +200,7 @@ func (ph *PostHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
     json.NewEncoder(w).Encode(posts)
 }
 
-// GetPost - Get a single post by ID
-func (ph *PostHandler) GetPost(w http.ResponseWriter, r *http.Request) {
-    userID, _ := middleware.GetUserID(r)
-
-    postIDStr := r.URL.Query().Get("id")
-    postID, err := strconv.ParseInt(postIDStr, 10, 64)
-    if err != nil {
-        http.Error(w, "Invalid post ID", http.StatusBadRequest)
-        return
-    }
-
-    var post models.Post
-    var user models.User
-    var commentCount, likeCount int
-    var isLiked, isSaved bool
-
-    err = ph.DB.QueryRow(`
-        SELECT p.id, p.user_id, p.content, p.image_path, p.privacy_level, p.group_id, p.created_at, p.updated_at,
-               u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path, u.is_public,
-               (SELECT COUNT(*) FROM comments WHERE post_id = p.id) as comment_count,
-               (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id) as like_count,
-               (SELECT COUNT(*) FROM post_likes WHERE post_id = p.id AND user_id = ?) as is_liked,
-               (SELECT COUNT(*) FROM saved_posts WHERE post_id = p.id AND user_id = ?) as is_saved
-        FROM posts p
-        JOIN users u ON p.user_id = u.id
-        WHERE p.id = ?
-    `, userID, userID, postID).Scan(
-        &post.ID, &post.UserID, &post.Content, &post.ImagePath, &post.PrivacyLevel,
-        &post.GroupID, &post.CreatedAt, &post.UpdatedAt,
-        &user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname,
-        &user.AvatarPath, &user.IsPublic,
-        &commentCount, &likeCount, &isLiked, &isSaved,
-    )
-
-    if err != nil {
-        http.Error(w, "Post not found", http.StatusNotFound)
-        return
-    }
-
-    post.User = &user
-
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "id":             post.ID,
-        "user_id":        post.UserID,
-        "content":        post.Content,
-        "image_path":     post.ImagePath,
-        "privacy_level":  post.PrivacyLevel,
-        "group_id":       post.GroupID,
-        "created_at":     post.CreatedAt,
-        "updated_at":     post.UpdatedAt,
-        "user":           post.User,
-        "comment_count":  commentCount,
-        "like_count":     likeCount,
-        "is_liked":       isLiked,
-        "is_saved":       isSaved,
-    })
-}
-
-// UpdatePost - Update an existing post
-func (ph *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
-    userID, _ := middleware.GetUserID(r)
-
-    postIDStr := r.URL.Query().Get("id")
-    postID, err := strconv.ParseInt(postIDStr, 10, 64)
-    if err != nil {
-        http.Error(w, "Invalid post ID", http.StatusBadRequest)
-        return
-    }
-
-    var ownerID int64
-    err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&ownerID)
-    if err != nil {
-        http.Error(w, "Post not found", http.StatusNotFound)
-        return
-    }
-
-    if ownerID != userID {
-        http.Error(w, "You don't have permission to update this post", http.StatusForbidden)
-        return
-    }
-
-    err = r.ParseMultipartForm(10 << 20)
-    if err != nil {
-        http.Error(w, "Failed to parse form", http.StatusBadRequest)
-        return
-    }
-
-    content := r.FormValue("content")
-    privacyLevel := r.FormValue("privacy_level")
-
-    if content == "" {
-        http.Error(w, "Content is required", http.StatusBadRequest)
-        return
-    }
-
-    if privacyLevel == "" {
-        privacyLevel = "public"
-    }
-
-    // Handle image update
-    var imagePath string
-    file, header, err := r.FormFile("image")
-    if err == nil {
-        defer file.Close()
-
-        contentType := header.Header.Get("Content-Type")
-        allowedTypes := []string{"image/jpeg", "image/png", "image/gif"}
-        isValidType := false
-        for _, t := range allowedTypes {
-            if contentType == t {
-                isValidType = true
-                break
-            }
-        }
-
-        if !isValidType {
-            http.Error(w, "Invalid image type. Only JPEG, PNG, and GIF are allowed", http.StatusBadRequest)
-            return
-        }
-
-        if header.Size > 5*1024*1024 {
-            http.Error(w, "Image size must be less than 5MB", http.StatusBadRequest)
-            return
-        }
-
-        // Delete old image if exists
-        var oldImagePath sql.NullString
-        ph.DB.QueryRow("SELECT image_path FROM posts WHERE id = ?", postID).Scan(&oldImagePath)
-        if oldImagePath.Valid && oldImagePath.String != "" {
-            filePath := strings.TrimPrefix(oldImagePath.String, "/uploads/")
-            os.Remove("./uploads/" + filePath)
-        }
-
-        // Save new image
-        uploadDir := "./uploads"
-        if err := os.MkdirAll(uploadDir, 0755); err != nil {
-            http.Error(w, "Failed to create upload directory", http.StatusInternalServerError)
-            return
-        }
-
-        ext := filepath.Ext(header.Filename)
-        filename := uuid.New().String() + ext
-        filePath := filepath.Join(uploadDir, filename)
-
-        out, err := os.Create(filePath)
-        if err != nil {
-            http.Error(w, "Failed to save image", http.StatusInternalServerError)
-            return
-        }
-        defer out.Close()
-
-        _, err = io.Copy(out, file)
-        if err != nil {
-            http.Error(w, "Failed to save image", http.StatusInternalServerError)
-            return
-        }
-
-        imagePath = "/uploads/" + filename
-    }
-
-    var updateErr error
-    if imagePath != "" {
-        _, updateErr = ph.DB.Exec(
-            `UPDATE posts SET content = ?, image_path = ?, privacy_level = ?, updated_at = ?
-             WHERE id = ?`,
-            content, imagePath, privacyLevel, time.Now(), postID,
-        )
-    } else {
-        _, updateErr = ph.DB.Exec(
-            `UPDATE posts SET content = ?, privacy_level = ?, updated_at = ?
-             WHERE id = ?`,
-            content, privacyLevel, time.Now(), postID,
-        )
-    }
-
-    if updateErr != nil {
-        http.Error(w, "Failed to update post: "+updateErr.Error(), http.StatusInternalServerError)
-        return
-    }
-
-    json.NewEncoder(w).Encode(map[string]string{
-        "message": "Post updated successfully",
-    })
-}
-
-// DeletePost - Delete a post
-func (ph *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
-    userID, _ := middleware.GetUserID(r)
-
-    postIDStr := r.URL.Query().Get("id")
-    postID, err := strconv.ParseInt(postIDStr, 10, 64)
-    if err != nil {
-        http.Error(w, "Invalid post ID", http.StatusBadRequest)
-        return
-    }
-
-    var ownerID int64
-    err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&ownerID)
-    if err != nil {
-        http.Error(w, "Post not found", http.StatusNotFound)
-        return
-    }
-
-    if ownerID != userID {
-        http.Error(w, "You don't have permission to delete this post", http.StatusForbidden)
-        return
-    }
-
-    // Get image path to delete
-    var imagePath sql.NullString
-    ph.DB.QueryRow("SELECT image_path FROM posts WHERE id = ?", postID).Scan(&imagePath)
-    if imagePath.Valid && imagePath.String != "" {
-        filePath := strings.TrimPrefix(imagePath.String, "/uploads/")
-        os.Remove("./uploads/" + filePath)
-    }
-
-    _, err = ph.DB.Exec("DELETE FROM posts WHERE id = ?", postID)
-    if err != nil {
-        http.Error(w, "Failed to delete post", http.StatusInternalServerError)
-        return
-    }
-
-    json.NewEncoder(w).Encode(map[string]string{
-        "message": "Post deleted successfully",
-    })
-}
-
-// LikePost - Like or unlike a post with notification
-func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
-    userID, _ := middleware.GetUserID(r)
-    postIDStr := r.URL.Query().Get("id")
-
-    postID, err := strconv.ParseInt(postIDStr, 10, 64)
-    if err != nil {
-        http.Error(w, "Invalid post ID", http.StatusBadRequest)
-        return
-    }
-
-    // Check if post exists and get post owner
-    var postUserID int64
-    err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&postUserID)
-    if err != nil {
-        http.Error(w, "Post not found", http.StatusNotFound)
-        return
-    }
-
-    // Check if already liked
-    var likeID int64
-    err = ph.DB.QueryRow(
-        "SELECT id FROM post_likes WHERE post_id = ? AND user_id = ?",
-        postID, userID,
-    ).Scan(&likeID)
-
-    if err == nil {
-        // Unlike
-        _, err = ph.DB.Exec("DELETE FROM post_likes WHERE id = ?", likeID)
-        if err != nil {
-            http.Error(w, "Failed to unlike post", http.StatusInternalServerError)
-            return
-        }
-        var likeCount int
-        ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
-        
-        w.Header().Set("Content-Type", "application/json")
-        json.NewEncoder(w).Encode(map[string]interface{}{
-            "message":    "Post unliked",
-            "liked":      false,
-            "like_count": likeCount,
-        })
-        return
-    }
-
-    // Like
-    _, err = ph.DB.Exec(
-        "INSERT INTO post_likes (post_id, user_id, created_at) VALUES (?, ?, ?)",
-        postID, userID, time.Now(),
-    )
-    if err != nil {
-        http.Error(w, "Failed to like post", http.StatusInternalServerError)
-        return
-    }
-
-    // ✅ Send notification to post owner (if not the same user)
-    if postUserID != userID {
-        var userName string
-        ph.DB.QueryRow("SELECT first_name || ' ' || last_name FROM users WHERE id = ?", userID).Scan(&userName)
-        
-        // Insert notification
-        _, err = ph.DB.Exec(
-            `INSERT INTO notifications (user_id, type, content, related_id, created_at, is_read)
-             VALUES (?, 'like', ?, ?, ?, ?)`,
-            postUserID, userName + " liked your post", postID, time.Now(), false,
-        )
-        if err != nil {
-            // Log error but don't fail the request
-            fmt.Printf("Failed to create like notification: %v\n", err)
-        }
-    }
-
-    var likeCount int
-    ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "message":    "Post liked",
-        "liked":      true,
-        "like_count": likeCount,
-    })
-}
-
-// SavePost - Save or unsave a post
-func (ph *PostHandler) SavePost(w http.ResponseWriter, r *http.Request) {
-    userID, _ := middleware.GetUserID(r)
-    postIDStr := r.URL.Query().Get("id")
-
-    postID, err := strconv.ParseInt(postIDStr, 10, 64)
-    if err != nil {
-        http.Error(w, "Invalid post ID", http.StatusBadRequest)
-        return
-    }
-
-    var exists bool
-    err = ph.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM posts WHERE id = ?)", postID).Scan(&exists)
-    if err != nil || !exists {
-        http.Error(w, "Post not found", http.StatusNotFound)
-        return
-    }
-
-    var saveID int64
-    err = ph.DB.QueryRow(
-        "SELECT id FROM saved_posts WHERE post_id = ? AND user_id = ?",
-        postID, userID,
-    ).Scan(&saveID)
-
-    if err == nil {
-        // Unsave
-        _, err = ph.DB.Exec("DELETE FROM saved_posts WHERE id = ?", saveID)
-        if err != nil {
-            http.Error(w, "Failed to unsave post", http.StatusInternalServerError)
-            return
-        }
-        json.NewEncoder(w).Encode(map[string]interface{}{
-            "message": "Post unsaved",
-            "saved":   false,
-        })
-        return
-    }
-
-    // Save
-    _, err = ph.DB.Exec(
-        "INSERT INTO saved_posts (post_id, user_id, created_at) VALUES (?, ?, ?)",
-        postID, userID, time.Now(),
-    )
-    if err != nil {
-        http.Error(w, "Failed to save post", http.StatusInternalServerError)
-        return
-    }
-
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "message": "Post saved",
-        "saved":   true,
-    })
-}
-
-// CreateComment - Create a comment with notification
+// CreateComment - Create a comment
 func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)
 
@@ -662,7 +224,7 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    // Check if post exists and get post owner
+    // Check if post exists
     var postUserID int64
     err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&postUserID)
     if err != nil {
@@ -676,40 +238,13 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
     if err == nil {
         defer file.Close()
 
-        contentType := header.Header.Get("Content-Type")
-        if contentType != "image/jpeg" && contentType != "image/png" && contentType != "image/gif" {
-            http.Error(w, "Invalid image type", http.StatusBadRequest)
-            return
-        }
-
-        if header.Size > 5*1024*1024 {
-            http.Error(w, "Image too large", http.StatusBadRequest)
-            return
-        }
-
-        uploadDir := "./uploads"
-        os.MkdirAll(uploadDir, 0755)
-        ext := filepath.Ext(header.Filename)
-        filename := uuid.New().String() + ext
-        filePath := filepath.Join(uploadDir, filename)
-
-        out, err := os.Create(filePath)
+        imagePath, err = saveUploadedImage(file, header, 5*1024*1024)
         if err != nil {
-            http.Error(w, "Failed to save image", http.StatusInternalServerError)
+            imageUploadErrorResponse(w, err)
             return
         }
-        defer out.Close()
-
-        _, err = io.Copy(out, file)
-        if err != nil {
-            http.Error(w, "Failed to save image", http.StatusInternalServerError)
-            return
-        }
-
-        imagePath = "/uploads/" + filename
     }
 
-    // Insert comment
     var result sql.Result
     if imagePath != "" {
         result, err = ph.DB.Exec(
@@ -739,19 +274,6 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
         userID,
     ).Scan(&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname, &user.AvatarPath)
 
-    // ✅ Send notification to post owner (if not the same user)
-    if postUserID != userID {
-        _, err = ph.DB.Exec(
-            `INSERT INTO notifications (user_id, type, content, related_id, created_at, is_read)
-             VALUES (?, 'comment', ?, ?, ?, ?)`,
-            postUserID, user.FirstName + " commented on your post", commentID, time.Now(), false,
-        )
-        if err != nil {
-            // Log error but don't fail
-            fmt.Printf("Failed to create comment notification: %v\n", err)
-        }
-    }
-
     comment := map[string]interface{}{
         "id":         commentID,
         "post_id":    postID,
@@ -760,6 +282,15 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
         "image_path": imagePath,
         "created_at": time.Now(),
         "user":       user,
+    }
+
+    // Send notification
+    if postUserID != userID {
+        ph.DB.Exec(
+            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+             VALUES (?, 'comment', ?, ?, ?)`,
+            postUserID, user.FirstName+" commented on your post", commentID, time.Now(),
+        )
     }
 
     w.Header().Set("Content-Type", "application/json")
@@ -824,4 +355,263 @@ func (ph *PostHandler) GetComments(w http.ResponseWriter, r *http.Request) {
     }
 
     json.NewEncoder(w).Encode(comments)
+}
+
+// LikePost - Like or unlike a post
+func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+    postIDStr := r.URL.Query().Get("id")
+
+    postID, err := strconv.ParseInt(postIDStr, 10, 64)
+    if err != nil {
+        http.Error(w, "Invalid post ID", http.StatusBadRequest)
+        return
+    }
+
+    // Check if post exists
+    var exists bool
+    err = ph.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM posts WHERE id = ?)", postID).Scan(&exists)
+    if err != nil || !exists {
+        http.Error(w, "Post not found", http.StatusNotFound)
+        return
+    }
+
+    // Check if already liked
+    var likeID int64
+    err = ph.DB.QueryRow(
+        "SELECT id FROM post_likes WHERE post_id = ? AND user_id = ?",
+        postID, userID,
+    ).Scan(&likeID)
+
+    if err == nil {
+        // Unlike
+        _, err = ph.DB.Exec("DELETE FROM post_likes WHERE id = ?", likeID)
+        if err != nil {
+            http.Error(w, "Failed to unlike post", http.StatusInternalServerError)
+            return
+        }
+        var likeCount int
+        ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
+        
+        // ✅ Return JSON response
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "message":    "Post unliked",
+            "liked":      false,
+            "like_count": likeCount,
+        })
+        return
+    }
+
+    // Like
+    _, err = ph.DB.Exec(
+        "INSERT INTO post_likes (post_id, user_id, created_at) VALUES (?, ?, ?)",
+        postID, userID, time.Now(),
+    )
+    if err != nil {
+        http.Error(w, "Failed to like post", http.StatusInternalServerError)
+        return
+    }
+
+    // Send notification
+    var postUserID int64
+    ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&postUserID)
+    if postUserID != userID {
+        var userName string
+        ph.DB.QueryRow("SELECT first_name FROM users WHERE id = ?", userID).Scan(&userName)
+        ph.DB.Exec(
+            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+             VALUES (?, 'like', ?, ?, ?)`,
+            postUserID, userName+" liked your post", postID, time.Now(),
+        )
+    }
+
+    var likeCount int
+    ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
+
+    // ✅ Return JSON response
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "message":    "Post liked",
+        "liked":      true,
+        "like_count": likeCount,
+    })
+}
+// SavePost - Save or unsave a post
+func (ph *PostHandler) SavePost(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+    postIDStr := r.URL.Query().Get("id")
+
+    postID, err := strconv.ParseInt(postIDStr, 10, 64)
+    if err != nil {
+        http.Error(w, "Invalid post ID", http.StatusBadRequest)
+        return
+    }
+
+    var exists bool
+    err = ph.DB.QueryRow("SELECT EXISTS(SELECT 1 FROM posts WHERE id = ?)", postID).Scan(&exists)
+    if err != nil || !exists {
+        http.Error(w, "Post not found", http.StatusNotFound)
+        return
+    }
+
+    var saveID int64
+    err = ph.DB.QueryRow(
+        "SELECT id FROM saved_posts WHERE post_id = ? AND user_id = ?",
+        postID, userID,
+    ).Scan(&saveID)
+
+    if err == nil {
+        _, err = ph.DB.Exec("DELETE FROM saved_posts WHERE id = ?", saveID)
+        if err != nil {
+            http.Error(w, "Failed to unsave post", http.StatusInternalServerError)
+            return
+        }
+        json.NewEncoder(w).Encode(map[string]interface{}{
+            "message": "Post unsaved",
+            "saved":   false,
+        })
+        return
+    }
+
+    _, err = ph.DB.Exec(
+        "INSERT INTO saved_posts (post_id, user_id, created_at) VALUES (?, ?, ?)",
+        postID, userID, time.Now(),
+    )
+    if err != nil {
+        http.Error(w, "Failed to save post", http.StatusInternalServerError)
+        return
+    }
+
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "message": "Post saved",
+        "saved":   true,
+    })
+}
+
+// DeletePost - Delete a post
+func (ph *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+
+    postIDStr := r.URL.Query().Get("id")
+    postID, err := strconv.ParseInt(postIDStr, 10, 64)
+    if err != nil {
+        http.Error(w, "Invalid post ID", http.StatusBadRequest)
+        return
+    }
+
+    var ownerID int64
+    err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&ownerID)
+    if err != nil {
+        http.Error(w, "Post not found", http.StatusNotFound)
+        return
+    }
+
+    if ownerID != userID {
+        http.Error(w, "You don't have permission to delete this post", http.StatusForbidden)
+        return
+    }
+
+    var imagePath sql.NullString
+    ph.DB.QueryRow("SELECT image_path FROM posts WHERE id = ?", postID).Scan(&imagePath)
+    if imagePath.Valid {
+        deleteUploadedImage(imagePath.String)
+    }
+
+    _, err = ph.DB.Exec("DELETE FROM posts WHERE id = ?", postID)
+    if err != nil {
+        http.Error(w, "Failed to delete post", http.StatusInternalServerError)
+        return
+    }
+
+    json.NewEncoder(w).Encode(map[string]string{
+        "message": "Post deleted successfully",
+    })
+}
+
+// UpdatePost - Update an existing post
+func (ph *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+
+    postIDStr := r.URL.Query().Get("id")
+    postID, err := strconv.ParseInt(postIDStr, 10, 64)
+    if err != nil {
+        http.Error(w, "Invalid post ID", http.StatusBadRequest)
+        return
+    }
+
+    // Check if post exists and belongs to user
+    var ownerID int64
+    err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&ownerID)
+    if err != nil {
+        http.Error(w, "Post not found", http.StatusNotFound)
+        return
+    }
+
+    if ownerID != userID {
+        http.Error(w, "You don't have permission to update this post", http.StatusForbidden)
+        return
+    }
+
+    // Parse form data
+    err = r.ParseMultipartForm(10 << 20)
+    if err != nil {
+        http.Error(w, "Failed to parse form", http.StatusBadRequest)
+        return
+    }
+
+    content := r.FormValue("content")
+    privacyLevel := r.FormValue("privacy_level")
+
+    if content == "" {
+        http.Error(w, "Content is required", http.StatusBadRequest)
+        return
+    }
+
+    if privacyLevel == "" {
+        privacyLevel = "public"
+    }
+
+    // Handle image update
+    var imagePath string
+    file, header, err := r.FormFile("image")
+    if err == nil {
+        defer file.Close()
+
+        imagePath, err = saveUploadedImage(file, header, 5*1024*1024)
+        if err != nil {
+            imageUploadErrorResponse(w, err)
+            return
+        }
+
+        // Delete old image now that the new one is safely saved
+        var oldImagePath sql.NullString
+        ph.DB.QueryRow("SELECT image_path FROM posts WHERE id = ?", postID).Scan(&oldImagePath)
+        if oldImagePath.Valid {
+            deleteUploadedImage(oldImagePath.String)
+        }
+    }
+
+    // Update post
+    var updateErr error
+    if imagePath != "" {
+        _, updateErr = ph.DB.Exec(
+            `UPDATE posts SET content = ?, image_path = ?, privacy_level = ?, updated_at = ?
+             WHERE id = ?`,
+            content, imagePath, privacyLevel, time.Now(), postID,
+        )
+    } else {
+        _, updateErr = ph.DB.Exec(
+            `UPDATE posts SET content = ?, privacy_level = ?, updated_at = ?
+             WHERE id = ?`,
+            content, privacyLevel, time.Now(), postID,
+        )
+    }
+
+    if updateErr != nil {
+        http.Error(w, "Failed to update post: "+updateErr.Error(), http.StatusInternalServerError)
+        return
+    }
+
+    json.NewEncoder(w).Encode(map[string]string{
+        "message": "Post updated successfully",
+    })
 }

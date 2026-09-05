@@ -14,7 +14,8 @@ export default function ChatPage() {
         const authRes = await fetch("http://localhost:8081/api/check-auth", {
           credentials: "include",
         });
-        if (!authRes.ok) {
+        const authData = await authRes.json();
+        if (!authData.authenticated) {
           router.push("/login");
           return;
         }

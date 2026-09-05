@@ -164,6 +164,50 @@ func (uh *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
     })
 }
 
+// UploadAvatar - Upload/replace the current user's profile picture
+func (uh *UserHandler) UploadAvatar(w http.ResponseWriter, r *http.Request) {
+    w.Header().Set("Content-Type", "application/json")
+    userID, _ := middleware.GetUserID(r)
+
+    if err := r.ParseMultipartForm(5 << 20); err != nil {
+        http.Error(w, "Failed to parse form", http.StatusBadRequest)
+        return
+    }
+
+    file, header, err := r.FormFile("avatar")
+    if err != nil {
+        http.Error(w, "Avatar image is required", http.StatusBadRequest)
+        return
+    }
+    defer file.Close()
+
+    avatarPath, err := saveUploadedImage(file, header, 5*1024*1024)
+    if err != nil {
+        imageUploadErrorResponse(w, err)
+        return
+    }
+
+    var oldAvatarPath sql.NullString
+    uh.DB.QueryRow("SELECT avatar_path FROM users WHERE id = ?", userID).Scan(&oldAvatarPath)
+
+    if _, err := uh.DB.Exec(
+        "UPDATE users SET avatar_path = ?, updated_at = ? WHERE id = ?",
+        avatarPath, time.Now(), userID,
+    ); err != nil {
+        http.Error(w, "Failed to update avatar", http.StatusInternalServerError)
+        return
+    }
+
+    if oldAvatarPath.Valid {
+        deleteUploadedImage(oldAvatarPath.String)
+    }
+
+    json.NewEncoder(w).Encode(map[string]string{
+        "message":     "Avatar updated successfully",
+        "avatar_path": avatarPath,
+    })
+}
+
 // FollowUser - Follow a user
 func (uh *UserHandler) FollowUser(w http.ResponseWriter, r *http.Request) {
     followerID, _ := middleware.GetUserID(r)

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import toast from "react-hot-toast";
+import { toast } from "@/context/ToastContext";
 
 export default function GroupsPage() {
   const router = useRouter();
@@ -21,7 +21,8 @@ export default function GroupsPage() {
       const authRes = await fetch("http://localhost:8081/api/check-auth", {
         credentials: "include",
       });
-      if (!authRes.ok) {
+      const authData = await authRes.json();
+      if (!authData.authenticated) {
         router.push("/login");
         return;
       }
@@ -138,6 +139,8 @@ export default function GroupsPage() {
           onSubmit={handleCreateGroup}
           className='bg-white rounded-lg shadow p-4 mb-4'>
           <input
+            id='group-title'
+            name='title'
             type='text'
             placeholder='Group Title *'
             value={newGroup.title}
@@ -148,6 +151,8 @@ export default function GroupsPage() {
             required
           />
           <textarea
+            id='group-description'
+            name='description'
             placeholder='Description (optional)'
             value={newGroup.description}
             onChange={(e) =>

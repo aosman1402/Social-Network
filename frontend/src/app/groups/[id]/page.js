@@ -2,13 +2,14 @@
 
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
-import toast from "react-hot-toast";
-import GroupChat from "@/components/GroupChat";
+import { toast } from "@/context/ToastContext";
 
 export default function GroupDetailPage() {
+  // ✅ params.id comes from the [id] folder name
   const params = useParams();
   const router = useRouter();
-  const groupId = params.id;
+  const groupId = params.id; // This is the value from the URL
+
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -17,52 +18,21 @@ export default function GroupDetailPage() {
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviting, setInviting] = useState(false);
-  const [activeTab, setActiveTab] = useState("posts");
-  const [currentUser, setCurrentUser] = useState(null);
-  const [isMember, setIsMember] = useState(false);
-  const [isCreator, setIsCreator] = useState(false);
-  const [events, setEvents] = useState([]);
-  const [showEventModal, setShowEventModal] = useState(false);
-  const [eventForm, setEventForm] = useState({
-    title: "",
-    description: "",
-    event_time: "",
-  });
-  const [creatingEvent, setCreatingEvent] = useState(false);
 
-  // Get current user
-  useEffect(() => {
-    const getCurrentUser = async () => {
-      try {
-        const response = await fetch("http://localhost:8081/api/check-auth", {
-          credentials: "include",
-        });
-        if (response.ok) {
-          const data = await response.json();
-          setCurrentUser(data);
-        }
-      } catch (error) {
-        console.error("Error getting current user:", error);
-      }
-    };
-    getCurrentUser();
-  }, []);
-
-  // Fetch group details
   useEffect(() => {
     const fetchGroup = async () => {
       try {
-        setLoading(true);
-        setError(null);
-
+        // Check authentication
         const authRes = await fetch("http://localhost:8081/api/check-auth", {
           credentials: "include",
         });
-        if (!authRes.ok) {
+        const authData = await authRes.json();
+        if (!authData.authenticated) {
           router.push("/login");
           return;
         }
 
+        // ✅ Fetch group by ID
         const response = await fetch(
           `http://localhost:8081/api/group/detail?id=${groupId}`,
           {
@@ -83,13 +53,6 @@ export default function GroupDetailPage() {
         setGroup(data);
         setMembers(data.members || []);
         setPendingRequests(data.pending_requests || []);
-        setIsMember(data.is_member || false);
-        setIsCreator(data.creator_id === currentUser?.id);
-
-        // Fetch events if member
-        if (data.is_member) {
-          await fetchEvents();
-        }
       } catch (error) {
         console.error("Error fetching group:", error);
         setError("Network error");
@@ -101,24 +64,7 @@ export default function GroupDetailPage() {
     if (groupId) {
       fetchGroup();
     }
-  }, [groupId, router, currentUser?.id]);
-
-  const fetchEvents = async () => {
-    try {
-      const response = await fetch(
-        `http://localhost:8081/api/group/events?group_id=${groupId}`,
-        {
-          credentials: "include",
-        },
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setEvents(data);
-      }
-    } catch (error) {
-      console.error("Error fetching events:", error);
-    }
-  };
+  }, [groupId, router]);
 
   const handleJoinGroup = async () => {
     try {
@@ -181,7 +127,7 @@ export default function GroupDetailPage() {
 
     setInviting(true);
     try {
-      // First find user by email
+      // Search for user by email
       const userRes = await fetch(
         `http://localhost:8081/api/user/search?email=${inviteEmail}`,
         {
@@ -256,93 +202,6 @@ export default function GroupDetailPage() {
     }
   };
 
-  const handleCreateEvent = async (e) => {
-    e.preventDefault();
-    if (!eventForm.title.trim() || !eventForm.event_time) {
-      toast.error("Title and time are required");
-      return;
-    }
-
-    setCreatingEvent(true);
-    try {
-      const response = await fetch(
-        "http://localhost:8081/api/group/event/create",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            group_id: parseInt(groupId),
-            title: eventForm.title,
-            description: eventForm.description,
-            event_time: new Date(eventForm.event_time).toISOString(),
-          }),
-        },
-      );
-
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success("Event created successfully!");
-        setShowEventModal(false);
-        setEventForm({ title: "", description: "", event_time: "" });
-        await fetchEvents();
-      } else {
-        toast.error(data.error || "Failed to create event");
-      }
-    } catch (error) {
-      console.error("Error creating event:", error);
-      toast.error("Failed to create event");
-    } finally {
-      setCreatingEvent(false);
-    }
-  };
-
-  const handleEventResponse = async (eventId, response) => {
-    try {
-      const res = await fetch("http://localhost:8081/api/group/event/respond", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          event_id: eventId,
-          response: response,
-        }),
-      });
-
-      if (res.ok) {
-        toast.success(`You are ${response}`);
-        await fetchEvents();
-      } else {
-        const data = await res.json();
-        toast.error(data.error || "Failed to respond to event");
-      }
-    } catch (error) {
-      console.error("Error responding to event:", error);
-      toast.error("Failed to respond to event");
-    }
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return "";
-    try {
-      const date = new Date(dateString);
-      return date.toLocaleDateString("en-US", {
-        year: "numeric",
-        month: "long",
-        day: "numeric",
-        hour: "2-digit",
-        minute: "2-digit",
-      });
-    } catch {
-      return "";
-    }
-  };
-
   if (loading) {
     return (
       <div className='flex justify-center items-center h-64'>
@@ -378,9 +237,11 @@ export default function GroupDetailPage() {
     );
   }
 
+  const isMember = group.is_member || false;
+
   return (
     <div className='max-w-4xl mx-auto py-4 px-4'>
-      {/* Back Button */}
+      {/* Back button */}
       <button
         onClick={() => router.push("/groups")}
         className='text-blue-500 hover:text-blue-700 mb-4 flex items-center'>
@@ -430,13 +291,11 @@ export default function GroupDetailPage() {
                     className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
                     + Invite
                   </button>
-                  {!isCreator && (
-                    <button
-                      onClick={handleLeaveGroup}
-                      className='px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition'>
-                      Leave
-                    </button>
-                  )}
+                  <button
+                    onClick={handleLeaveGroup}
+                    className='px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition'>
+                    Leave
+                  </button>
                 </>
               )}
             </div>
@@ -444,236 +303,79 @@ export default function GroupDetailPage() {
         </div>
 
         {/* Pending Requests (only for creator) */}
-        {isCreator && pendingRequests.length > 0 && (
-          <div className='p-4 border-b'>
-            <h3 className='font-semibold mb-2'>Pending Join Requests</h3>
-            <div className='space-y-2'>
-              {pendingRequests.map((req) => (
-                <div
-                  key={req.id}
-                  className='flex items-center justify-between bg-gray-50 p-2 rounded'>
-                  <div>
-                    <p className='font-medium'>
-                      {req.user.first_name} {req.user.last_name}
-                    </p>
-                    <p className='text-sm text-gray-500'>
-                      @{req.user.nickname || req.user.first_name}
-                    </p>
-                  </div>
-                  <div className='flex space-x-2'>
-                    <button
-                      onClick={() => handleRequestAction(req.id, "accept")}
-                      className='px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm'>
-                      Accept
-                    </button>
-                    <button
-                      onClick={() => handleRequestAction(req.id, "decline")}
-                      className='px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm'>
-                      Decline
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div className='flex border-b overflow-x-auto'>
-          <button
-            onClick={() => setActiveTab("posts")}
-            className={`px-4 py-3 text-sm font-medium transition whitespace-nowrap ${
-              activeTab === "posts"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            Posts
-          </button>
-          <button
-            onClick={() => setActiveTab("events")}
-            className={`px-4 py-3 text-sm font-medium transition whitespace-nowrap ${
-              activeTab === "events"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            Events
-          </button>
-          <button
-            onClick={() => setActiveTab("members")}
-            className={`px-4 py-3 text-sm font-medium transition whitespace-nowrap ${
-              activeTab === "members"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            Members
-          </button>
-          <button
-            onClick={() => setActiveTab("chat")}
-            className={`px-4 py-3 text-sm font-medium transition whitespace-nowrap ${
-              activeTab === "chat"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            💬 Chat
-          </button>
-        </div>
-
-        {/* Tab Content */}
-        <div className='p-4'>
-          {/* Posts Tab */}
-          {activeTab === "posts" && (
-            <div>
-              {isMember ? (
-                <div className='text-center text-gray-400 py-8'>
-                  <p>Group posts will appear here</p>
-                  <p className='text-sm mt-2'>Create a post in the group!</p>
-                </div>
-              ) : (
-                <div className='text-center py-8 text-gray-500'>
-                  <p>Join the group to see posts</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Events Tab */}
-          {activeTab === "events" && (
-            <div>
-              {isMember ? (
-                <>
-                  <button
-                    onClick={() => setShowEventModal(true)}
-                    className='mb-4 px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition'>
-                    + Create Event
-                  </button>
-                  <div className='space-y-3'>
-                    {events.length === 0 ? (
-                      <div className='text-center text-gray-400 py-8'>
-                        <p>No events yet</p>
-                        <p className='text-sm mt-2'>Create the first event!</p>
-                      </div>
-                    ) : (
-                      events.map((event) => (
-                        <div
-                          key={event.id}
-                          className='bg-gray-50 rounded-lg p-4 border'>
-                          <div className='flex items-start justify-between'>
-                            <div>
-                              <h4 className='font-semibold'>{event.title}</h4>
-                              <p className='text-sm text-gray-600'>
-                                {event.description}
-                              </p>
-                              <p className='text-sm text-gray-500 mt-1'>
-                                📅 {formatDate(event.event_time)}
-                              </p>
-                              <p className='text-xs text-gray-400 mt-1'>
-                                Created by {event.creator?.first_name}{" "}
-                                {event.creator?.last_name}
-                              </p>
-                              <div className='flex items-center space-x-4 mt-2'>
-                                <span className='text-sm text-gray-500'>
-                                  ✅ Going:{" "}
-                                  {event.responses?.filter(
-                                    (r) => r.response === "going",
-                                  ).length || 0}
-                                </span>
-                                <span className='text-sm text-gray-500'>
-                                  ❌ Not going:{" "}
-                                  {event.responses?.filter(
-                                    (r) => r.response === "not_going",
-                                  ).length || 0}
-                                </span>
-                              </div>
-                            </div>
-                            <div className='flex space-x-2'>
-                              <button
-                                onClick={() =>
-                                  handleEventResponse(event.id, "going")
-                                }
-                                className={`px-3 py-1 text-sm rounded ${
-                                  event.user_response === "going"
-                                    ? "bg-green-500 text-white"
-                                    : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-                                }`}>
-                                Going
-                              </button>
-                              <button
-                                onClick={() =>
-                                  handleEventResponse(event.id, "not_going")
-                                }
-                                className={`px-3 py-1 text-sm rounded ${
-                                  event.user_response === "not_going"
-                                    ? "bg-red-500 text-white"
-                                    : "bg-gray-200 text-gray-600 hover:bg-gray-300"
-                                }`}>
-                                Not Going
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className='text-center py-8 text-gray-500'>
-                  <p>Join the group to see events</p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Members Tab */}
-          {activeTab === "members" && (
-            <div className='space-y-2'>
-              {members.length === 0 ? (
-                <p className='text-center text-gray-400 py-4'>No members yet</p>
-              ) : (
-                members.map((member) => (
+        {group.creator_id === parseInt(localStorage.getItem("userId") || "0") &&
+          pendingRequests.length > 0 && (
+            <div className='p-4 border-b'>
+              <h3 className='font-semibold mb-2'>Pending Join Requests</h3>
+              <div className='space-y-2'>
+                {pendingRequests.map((req) => (
                   <div
-                    key={member.user.id}
+                    key={req.id}
                     className='flex items-center justify-between bg-gray-50 p-2 rounded'>
-                    <div
-                      className='flex items-center space-x-3 cursor-pointer'
-                      onClick={() => router.push(`/profile/${member.user.id}`)}>
-                      <div className='w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold'>
-                        {member.user.first_name?.[0]}
-                        {member.user.last_name?.[0]}
-                      </div>
-                      <div>
-                        <p className='font-medium'>
-                          {member.user.first_name} {member.user.last_name}
-                        </p>
-                        {member.user.nickname && (
-                          <p className='text-sm text-gray-500'>
-                            @{member.user.nickname}
-                          </p>
-                        )}
-                      </div>
+                    <div>
+                      <p className='font-medium'>
+                        {req.user.first_name} {req.user.last_name}
+                      </p>
+                      <p className='text-sm text-gray-500'>
+                        @{req.user.nickname || req.user.first_name}
+                      </p>
                     </div>
-                    {member.user.id === group.creator_id && (
-                      <span className='text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded'>
-                        Creator
-                      </span>
-                    )}
+                    <div className='flex space-x-2'>
+                      <button
+                        onClick={() => handleRequestAction(req.id, "accept")}
+                        className='px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm'>
+                        Accept
+                      </button>
+                      <button
+                        onClick={() => handleRequestAction(req.id, "decline")}
+                        className='px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm'>
+                        Decline
+                      </button>
+                    </div>
                   </div>
-                ))
-              )}
+                ))}
+              </div>
             </div>
           )}
 
-          {/* Chat Tab */}
-          {activeTab === "chat" && (
-            <div>
-              {isMember ? (
-                <GroupChat groupId={groupId} />
-              ) : (
-                <div className='text-center py-8 text-gray-500'>
-                  <p>Join the group to chat!</p>
+        {/* Members */}
+        <div className='p-4'>
+          <h3 className='font-semibold mb-2'>Members ({members.length})</h3>
+          <div className='space-y-2'>
+            {members.length === 0 ? (
+              <p className='text-gray-400'>No members yet</p>
+            ) : (
+              members.map((member) => (
+                <div
+                  key={member.user.id}
+                  className='flex items-center justify-between bg-gray-50 p-2 rounded'>
+                  <div
+                    className='flex items-center space-x-3 cursor-pointer'
+                    onClick={() => router.push(`/profile/${member.user.id}`)}>
+                    <div className='w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold'>
+                      {member.user.first_name?.[0]}
+                      {member.user.last_name?.[0]}
+                    </div>
+                    <div>
+                      <p className='font-medium'>
+                        {member.user.first_name} {member.user.last_name}
+                      </p>
+                      {member.user.nickname && (
+                        <p className='text-sm text-gray-500'>
+                          @{member.user.nickname}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {member.user.id === group.creator_id && (
+                    <span className='text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded'>
+                      Creator
+                    </span>
+                  )}
                 </div>
-              )}
-            </div>
-          )}
+              ))
+            )}
+          </div>
         </div>
       </div>
 
@@ -703,59 +405,6 @@ export default function GroupDetailPage() {
                   disabled={inviting}
                   className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50'>
                   {inviting ? "Sending..." : "Send Invite"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Event Modal */}
-      {showEventModal && (
-        <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4'>
-          <div className='bg-white rounded-lg max-w-md w-full p-6'>
-            <h2 className='text-xl font-bold mb-4'>Create Event</h2>
-            <form onSubmit={handleCreateEvent} className='space-y-4'>
-              <input
-                type='text'
-                placeholder='Event Title *'
-                value={eventForm.title}
-                onChange={(e) =>
-                  setEventForm({ ...eventForm, title: e.target.value })
-                }
-                className='w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
-                required
-              />
-              <textarea
-                placeholder='Description'
-                value={eventForm.description}
-                onChange={(e) =>
-                  setEventForm({ ...eventForm, description: e.target.value })
-                }
-                rows='3'
-                className='w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none'
-              />
-              <input
-                type='datetime-local'
-                value={eventForm.event_time}
-                onChange={(e) =>
-                  setEventForm({ ...eventForm, event_time: e.target.value })
-                }
-                className='w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
-                required
-              />
-              <div className='flex justify-end space-x-2'>
-                <button
-                  type='button'
-                  onClick={() => setShowEventModal(false)}
-                  className='px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg'>
-                  Cancel
-                </button>
-                <button
-                  type='submit'
-                  disabled={creatingEvent}
-                  className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50'>
-                  {creatingEvent ? "Creating..." : "Create Event"}
                 </button>
               </div>
             </form>

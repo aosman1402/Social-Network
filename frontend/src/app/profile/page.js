@@ -12,13 +12,9 @@ export default function ProfileRedirect() {
         const response = await fetch("http://localhost:8081/api/check-auth", {
           credentials: "include",
         });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.id) {
-            router.replace(`/profile/${data.id}`);
-          } else {
-            router.replace("/login");
-          }
+        const data = await response.json();
+        if (data.authenticated) {
+          router.replace(`/profile/${data.id}`);
         } else {
           router.replace("/login");
         }

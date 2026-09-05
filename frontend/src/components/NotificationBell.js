@@ -2,8 +2,20 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { FaBell } from "react-icons/fa";
-import toast from "react-hot-toast";
+import { toast } from "@/context/ToastContext";
+
+function BellIcon({ size = 20 }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox='0 0 24 24'
+      fill='currentColor'
+      aria-hidden='true'>
+      <path d='M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z' />
+    </svg>
+  );
+}
 
 export default function NotificationBell() {
   const router = useRouter();
@@ -13,19 +25,13 @@ export default function NotificationBell() {
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
   const wsRef = useRef(null);
+  const reconnectTimerRef = useRef(null);
+  const reconnectDelayRef = useRef(1000);
+  const unmountingRef = useRef(false);
 
-  // ✅ Get session token from cookies
-  const getCookie = (name) => {
-    const value = `; ${document.cookie}`;
-    const parts = value.split(`; ${name}=`);
-    if (parts.length === 2) return parts.pop().split(";").shift();
-    return null;
-  };
-
-  // ✅ Fetch notifications and unread count
   useEffect(() => {
-    fetchNotifications();
     fetchUnreadCount();
+    fetchNotifications();
     connectWebSocket();
 
     // Click outside to close dropdown
@@ -35,92 +41,64 @@ export default function NotificationBell() {
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-
-    // Poll for updates every 30 seconds (fallback)
-    const interval = setInterval(() => {
-      fetchUnreadCount();
-    }, 30000);
-
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
-      clearInterval(interval);
-      if (wsRef.current) {
-        wsRef.current.close();
+      unmountingRef.current = true;
+      clearTimeout(reconnectTimerRef.current);
+      const ws = wsRef.current;
+      if (ws) {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          // Closing mid-handshake logs a "closed before connection
+          // established" warning; wait for it to open, then close it.
+          ws.addEventListener("open", () => ws.close(), { once: true });
+        } else {
+          ws.close();
+        }
       }
     };
   }, []);
 
-  // ✅ Connect WebSocket for real-time notifications
   const connectWebSocket = () => {
-    const token = getCookie("session_token");
-    if (!token) {
-      console.log("No session token found, skipping WebSocket connection");
-      return;
-    }
+    const ws = new WebSocket("ws://localhost:8081/ws");
+    wsRef.current = ws;
 
-    try {
-      const ws = new WebSocket(
-        `ws://localhost:8081/ws?token=${encodeURIComponent(token)}`,
-      );
-      wsRef.current = ws;
+    ws.onopen = () => {
+      reconnectDelayRef.current = 1000; // back to the short delay once healthy
+    };
 
-      ws.onopen = () => {
-        console.log("🔔 Notification WebSocket connected");
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "notification") {
-            const notification = JSON.parse(data.data);
-            console.log("🔔 New notification:", notification);
-
-            // Add to notifications list
-            setNotifications((prev) => [notification, ...prev]);
-            setUnreadCount((prev) => prev + 1);
-
-            // Show toast
-            toast.success(notification.content);
-          }
-        } catch (error) {
-          console.error("Error parsing notification:", error);
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === "notification") {
+          const notification = JSON.parse(data.data);
+          setNotifications((prev) => [notification, ...prev]);
+          setUnreadCount((prev) => prev + 1);
+          toast.success(notification.content);
         }
-      };
-
-      ws.onclose = () => {
-        console.log("🔔 Notification WebSocket disconnected");
-        // Reconnect after 5 seconds
-        setTimeout(connectWebSocket, 5000);
-      };
-
-      ws.onerror = (error) => {
-        console.error("🔔 Notification WebSocket error:", error);
-        ws.close();
-      };
-    } catch (error) {
-      console.error("Error creating WebSocket:", error);
-    }
-  };
-
-  // ✅ Fetch all notifications
-  const fetchNotifications = async () => {
-    setLoading(true);
-    try {
-      const response = await fetch("http://localhost:8081/api/notifications", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setNotifications(data || []);
+      } catch (error) {
+        console.error("Error parsing notification:", error);
       }
-    } catch (error) {
-      console.error("Error fetching notifications:", error);
-    } finally {
-      setLoading(false);
-    }
+    };
+
+    ws.onclose = () => {
+      if (unmountingRef.current) return;
+      // Reconnect with exponential backoff (capped at 30s) instead of
+      // leaving notifications silently offline until the next page visit.
+      const maxReconnectDelay = 30000;
+      reconnectTimerRef.current = setTimeout(() => {
+        reconnectDelayRef.current = Math.min(
+          reconnectDelayRef.current * 2,
+          maxReconnectDelay,
+        );
+        connectWebSocket();
+      }, reconnectDelayRef.current);
+    };
+
+    ws.onerror = (error) => {
+      console.error("Notification WebSocket error:", error);
+    };
   };
 
-  // ✅ Fetch unread count
   const fetchUnreadCount = async () => {
     try {
       const response = await fetch(
@@ -138,7 +116,23 @@ export default function NotificationBell() {
     }
   };
 
-  // ✅ Mark a notification as read
+  const fetchNotifications = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch("http://localhost:8081/api/notifications", {
+        credentials: "include",
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setNotifications(data || []);
+      }
+    } catch (error) {
+      console.error("Error fetching notifications:", error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const markAsRead = async (id) => {
     try {
       const response = await fetch(
@@ -163,7 +157,6 @@ export default function NotificationBell() {
     }
   };
 
-  // ✅ Mark all notifications as read
   const markAllAsRead = async () => {
     try {
       const response = await fetch(
@@ -184,12 +177,12 @@ export default function NotificationBell() {
     }
   };
 
-  // ✅ Navigate based on notification type
   const handleNotificationClick = (notification) => {
     if (!notification.is_read) {
       markAsRead(notification.id);
     }
 
+    // Navigate based on notification type
     switch (notification.type) {
       case "follow_request":
       case "follow_accepted":
@@ -203,7 +196,6 @@ export default function NotificationBell() {
         router.push(`/groups/${notification.related_id}`);
         break;
       case "comment":
-      case "like":
         router.push(`/`);
         break;
       default:
@@ -212,7 +204,6 @@ export default function NotificationBell() {
     setShowDropdown(false);
   };
 
-  // ✅ Get icon based on notification type
   const getNotificationIcon = (type) => {
     switch (type) {
       case "follow_request":
@@ -228,8 +219,6 @@ export default function NotificationBell() {
         return "📅";
       case "comment":
         return "💬";
-      case "like":
-        return "❤️";
       default:
         return "🔔";
     }
@@ -239,9 +228,8 @@ export default function NotificationBell() {
     <div className='relative' ref={dropdownRef}>
       <button
         onClick={() => setShowDropdown(!showDropdown)}
-        className='relative p-2 text-gray-600 hover:text-blue-600 transition'
-        title='Notifications'>
-        <FaBell size={20} />
+        className='relative p-2 text-gray-600 hover:text-blue-600 transition'>
+        <BellIcon size={20} />
         {unreadCount > 0 && (
           <span className='absolute top-0 right-0 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center'>
             {unreadCount > 9 ? "9+" : unreadCount}

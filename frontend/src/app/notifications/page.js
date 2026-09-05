@@ -2,12 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { formatDistanceToNow } from "date-fns";
-import toast from "react-hot-toast";
+import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
+import { toast } from "@/context/ToastContext";
 
 export default function NotificationsPage() {
   const router = useRouter();
-  const [notifications, setNotifications] = useState([]); // ✅ Initialize as empty array
+  const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -15,7 +15,8 @@ export default function NotificationsPage() {
       const response = await fetch("http://localhost:8081/api/check-auth", {
         credentials: "include",
       });
-      if (!response.ok) {
+      const data = await response.json();
+      if (!data.authenticated) {
         router.push("/login");
         return;
       }
@@ -31,13 +32,10 @@ export default function NotificationsPage() {
       });
       if (response.ok) {
         const data = await response.json();
-        setNotifications(Array.isArray(data) ? data : []);
-      } else {
-        setNotifications([]);
+        setNotifications(data);
       }
     } catch (error) {
       console.error("Error fetching notifications:", error);
-      setNotifications([]);
     } finally {
       setLoading(false);
     }
@@ -100,17 +98,12 @@ export default function NotificationsPage() {
         return "📅";
       case "comment":
         return "💬";
-      case "like":
-        return "❤️";
       default:
         return "🔔";
     }
   };
 
-  // ✅ Safe check for unread count
-  const unreadCount = Array.isArray(notifications)
-    ? notifications.filter((n) => !n.is_read).length
-    : 0;
+  const unreadCount = notifications.filter((n) => !n.is_read).length;
 
   if (loading) {
     return (
@@ -142,7 +135,7 @@ export default function NotificationsPage() {
         </div>
 
         <div className='divide-y'>
-          {!notifications || notifications.length === 0 ? (
+          {notifications.length === 0 ? (
             <div className='p-8 text-center text-gray-500'>
               <p className='text-4xl mb-2'>🔔</p>
               <p>No notifications yet</p>

@@ -337,19 +337,29 @@ func handleGroupMessage(db *sql.DB, senderID, groupID int64, content string, hub
 }
 
 func updateMessageReadStatus(db *sql.DB, messageID int64, userID int64) {
-    // Use the db parameter
     var recipientID sql.NullInt64
     err := db.QueryRow(
         "SELECT recipient_id FROM messages WHERE id = ?",
         messageID,
     ).Scan(&recipientID)
-    
+
     if err != nil {
         log.Printf("Failed to get message recipient: %v", err)
         return
     }
-    
-    if recipientID.Valid && recipientID.Int64 == userID {
-        log.Printf("Message %d marked as read by user %d", messageID, userID)
+
+    // Only the actual recipient can mark a message as read.
+    if !recipientID.Valid || recipientID.Int64 != userID {
+        return
     }
+
+    if _, err := db.Exec(
+        "UPDATE messages SET read_at = ? WHERE id = ? AND read_at IS NULL",
+        time.Now(), messageID,
+    ); err != nil {
+        log.Printf("Failed to mark message %d as read: %v", messageID, err)
+        return
+    }
+
+    log.Printf("Message %d marked as read by user %d", messageID, userID)
 }

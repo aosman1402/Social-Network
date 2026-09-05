@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import toast from "react-hot-toast";
+import { toast } from "@/context/ToastContext";
 
 export default function FollowRequests() {
   const router = useRouter();

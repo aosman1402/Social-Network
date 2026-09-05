@@ -35,8 +35,8 @@ export default function HomePage() {
           credentials: "include",
         });
 
-        if (response.ok) {
-          const data = await response.json();
+        const data = await response.json();
+        if (data.authenticated) {
           setUser(data);
           await fetchPosts();
         } else {

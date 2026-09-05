@@ -1,0 +1,101 @@
+# ===============================
+# Go (Backend)
+# ===============================
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+go.work
+go.work.sum
+
+vendor/
+
+*.coverprofile
+coverage.out
+coverage.html
+
+backend/dist/
+backend/build/
+backend/*.log
+
+# Backend runtime data - not source, shouldn't be committed
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+*.db-wal
+*.db-shm
+backend/data/
+backend/uploads/
+backend/.env
+backend/.env.local
+
+# ===============================
+# Node.js / Next.js (Frontend)
+# ===============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/dist/
+
+*.tsbuildinfo
+next-env.d.ts
+
+.vercel/
+
+frontend/coverage/
+frontend/.nyc_output/
+
+# Environment files - never commit real env vars, only the example template
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+!.env.example
+
+# ===============================
+# Common
+# ===============================
+logs/
+*.log
+*.log.*
+
+tmp/
+temp/
+*.tmp
+*.temp
+
+*.bak
+*.backup
+*~
+
+*.crash
+*.crashreport
+
+*.zip
+*.tar.gz
+*.rar
+
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Secret files
+*.pem
+*.key
+*.cert
+*.p12
+*.pfx

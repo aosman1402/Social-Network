@@ -4,6 +4,7 @@ import "./globals.css";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
+import { ToastProvider } from "@/context/ToastContext";
 import NotificationBell from "@/components/NotificationBell";
 
 function Navbar() {
@@ -93,12 +94,14 @@ export default function RootLayout({ children }) {
   return (
     <html lang='en'>
       <body>
-        <AuthProvider>
-          {!isAuthPage && <Navbar />}
-          <main className={!isAuthPage ? "max-w-7xl mx-auto p-4" : ""}>
-            {children}
-          </main>
-        </AuthProvider>
+        <ToastProvider>
+          <AuthProvider>
+            {!isAuthPage && <Navbar />}
+            <main className={!isAuthPage ? "max-w-7xl mx-auto p-4" : ""}>
+              {children}
+            </main>
+          </AuthProvider>
+        </ToastProvider>
       </body>
     </html>
   );

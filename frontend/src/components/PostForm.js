@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import toast from "react-hot-toast";
+import { toast } from "@/context/ToastContext";
 
 export default function PostForm({ onPostCreated }) {
   const { user } = useAuth();
@@ -108,6 +108,8 @@ export default function PostForm({ onPostCreated }) {
         </div>
         <div className='flex-1'>
           <textarea
+            id='post-content'
+            name='content'
             value={content}
             onChange={(e) => setContent(e.target.value)}
             placeholder="What's on your mind?"
@@ -150,6 +152,8 @@ export default function PostForm({ onPostCreated }) {
 
               {/* Privacy Selector */}
               <select
+                id='post-privacy'
+                name='privacy'
                 value={privacy}
                 onChange={(e) => setPrivacy(e.target.value)}
                 className='px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm'

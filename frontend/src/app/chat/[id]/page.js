@@ -2,8 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
-import { formatDistanceToNow } from "date-fns";
-import toast from "react-hot-toast";
+import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
+import { toast } from "@/context/ToastContext";
 
 export default function ChatDetailPage() {
   const params = useParams();
@@ -20,6 +20,11 @@ export default function ChatDetailPage() {
 
   // Connect WebSocket
   useEffect(() => {
+    let reconnectTimer = null;
+    let reconnectDelay = 1000;
+    const maxReconnectDelay = 30000;
+    let unmounting = false;
+
     const connectWebSocket = () => {
       const ws = new WebSocket("ws://localhost:8081/ws");
       wsRef.current = ws;
@@ -27,6 +32,7 @@ export default function ChatDetailPage() {
       ws.onopen = () => {
         console.log("WebSocket connected");
         setIsConnected(true);
+        reconnectDelay = 1000; // back to the short delay once we're healthy
       };
 
       ws.onmessage = (event) => {
@@ -45,6 +51,14 @@ export default function ChatDetailPage() {
       ws.onclose = () => {
         console.log("WebSocket disconnected");
         setIsConnected(false);
+        if (unmounting) return;
+        // Reconnect with exponential backoff (capped at 30s) instead of
+        // leaving the chat silently offline until the user navigates away
+        // and back.
+        reconnectTimer = setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+          connectWebSocket();
+        }, reconnectDelay);
       };
 
       ws.onerror = (error) => {
@@ -97,8 +111,17 @@ export default function ChatDetailPage() {
     fetchChat();
 
     return () => {
-      if (wsRef.current) {
-        wsRef.current.close();
+      unmounting = true;
+      clearTimeout(reconnectTimer);
+      const ws = wsRef.current;
+      if (ws) {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          // Closing mid-handshake logs a "closed before connection
+          // established" warning; wait for it to open, then close it.
+          ws.addEventListener("open", () => ws.close(), { once: true });
+        } else {
+          ws.close();
+        }
       }
     };
   }, [userId, router]);
@@ -106,6 +129,24 @@ export default function ChatDetailPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages]);
+
+  // Tell the server which of the other person's messages we've now seen.
+  // Re-runs whenever the message list changes or the socket (re)connects;
+  // marking an already-read message again is a harmless no-op server-side.
+  useEffect(() => {
+    if (!isConnected || !wsRef.current) return;
+    const otherUserId = parseInt(userId);
+    messages
+      .filter((m) => m.sender_id === otherUserId)
+      .forEach((m) => {
+        wsRef.current.send(
+          JSON.stringify({
+            type: "read_receipt",
+            data: JSON.stringify({ message_id: m.id }),
+          }),
+        );
+      });
+  }, [isConnected, messages, userId]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
