@@ -94,7 +94,7 @@ func main() {
             }
 
             w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
-            w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Cookie, Set-Cookie")
+            w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, Accept, Cookie, Set-Cookie, X-Device-Fingerprint")
             w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
 
             if r.Method == "OPTIONS" {
@@ -114,6 +114,9 @@ func main() {
 
     // Auth routes
     http.HandleFunc("/api/register", cors(authHandler.Register))
+    // check-nickname is public too, for the same reason as check-auth below -
+    // it's used while filling out the registration form, before a session exists.
+    http.HandleFunc("/api/check-nickname", cors(authHandler.CheckNickname))
     http.HandleFunc("/api/login", cors(loginRateLimiter.Limit(authHandler.Login)))
     http.HandleFunc("/api/logout", cors(authMiddleware.Authenticate(authHandler.Logout)))
     http.HandleFunc("/api/user/password", cors(authMiddleware.Authenticate(authHandler.ChangePassword)))

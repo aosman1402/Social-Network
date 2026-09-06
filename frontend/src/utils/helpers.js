@@ -140,6 +140,64 @@ export const getInitials = (firstName, lastName) => {
 };
 
 /**
+ * Special/symbol characters the password policy accepts, exactly as listed:
+ * the space character plus every standard printable-ASCII punctuation mark.
+ */
+export const PASSWORD_SPECIAL_CHARS = " !\"#$%&'()*+,-./:;<=>?@[\\]^_`{|}~";
+
+/**
+ * Check a password against the site's policy: 12-15 characters, made up
+ * entirely of lowercase letters, uppercase letters, digits, and/or the
+ * special characters above, with at least one of each of those four
+ * categories present. Used to both drive the live requirements checklist
+ * and to gate submission - the backend enforces the same rule independently.
+ * @param {string} password - Password to check
+ * @returns {{length: boolean, lowercase: boolean, uppercase: boolean, digit: boolean, special: boolean, validCharsOnly: boolean}}
+ */
+export const getPasswordChecks = (password = "") => {
+  let validCharsOnly = true;
+  let lowercase = false;
+  let uppercase = false;
+  let digit = false;
+  let special = false;
+
+  for (const ch of password) {
+    if (ch >= "a" && ch <= "z") lowercase = true;
+    else if (ch >= "A" && ch <= "Z") uppercase = true;
+    else if (ch >= "0" && ch <= "9") digit = true;
+    else if (PASSWORD_SPECIAL_CHARS.includes(ch)) special = true;
+    else validCharsOnly = false;
+  }
+
+  return {
+    length: password.length >= 12 && password.length <= 15,
+    lowercase,
+    uppercase,
+    digit,
+    special,
+    validCharsOnly,
+  };
+};
+
+/**
+ * Whether a password satisfies every requirement in getPasswordChecks.
+ * @param {string} password - Password to check
+ * @returns {boolean} True if the password meets the full policy
+ */
+export const isPasswordValid = (password = "") =>
+  Object.values(getPasswordChecks(password)).every(Boolean);
+
+/**
+ * Nickname format policy: 3-14 characters, using only letters (a-z, A-Z)
+ * and digits (0-9). Doesn't check uniqueness - that requires asking the
+ * server (see the register page's availability check).
+ * @param {string} nickname - Nickname to check
+ * @returns {boolean} True if the format is valid
+ */
+export const isValidNicknameFormat = (nickname = "") =>
+  /^[A-Za-z0-9]{3,14}$/.test(nickname);
+
+/**
  * Check if a string is a valid email
  * @param {string} email - Email to validate
  * @returns {boolean} True if valid email
@@ -325,6 +383,69 @@ export const formatPhone = (phone) => {
 };
 
 /**
+ * Resolve a stored avatar_path into something an <img> can load directly.
+ * An absolute URL (e.g. a DiceBear avatar picked at registration) is
+ * returned as-is; a relative path (e.g. "/uploads/xxx.jpg", from an
+ * uploaded file) is prefixed with the backend origin.
+ * @param {string|null|undefined} avatarPath - Stored avatar_path value
+ * @param {string} backendOrigin - Backend origin to prefix relative paths with
+ * @returns {string|null} Usable image src, or null if there's no avatar
+ */
+export const getAvatarSrc = (avatarPath, backendOrigin = "http://localhost:8081") => {
+  if (!avatarPath) return null;
+  if (/^https?:\/\//i.test(avatarPath)) return avatarPath;
+  return `${backendOrigin}${avatarPath}`;
+};
+
+/**
+ * Downscale and re-encode an image file in the browser before upload, so it
+ * doesn't take much space once stored. GIFs are returned unchanged - running
+ * one through <canvas> would flatten its animation to a single frame - and
+ * rely on the backend's own size cap instead.
+ * @param {File} file - Original image file (already validated as JPEG/PNG/GIF)
+ * @param {number} maxDimension - Max width/height in pixels
+ * @param {number} quality - JPEG re-encode quality (0-1); ignored for PNG/GIF
+ * @returns {Promise<Blob>} The resized (or, for GIF, unchanged) image blob
+ */
+export const resizeImageFile = (file, maxDimension = 320, quality = 0.8) => {
+  return new Promise((resolve, reject) => {
+    if (file.type === "image/gif") {
+      resolve(file);
+      return;
+    }
+
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+
+      const scale = Math.min(1, maxDimension / Math.max(img.width, img.height));
+      const width = Math.round(img.width * scale);
+      const height = Math.round(img.height * scale);
+
+      const canvas = document.createElement("canvas");
+      canvas.width = width;
+      canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+
+      const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+      canvas.toBlob(
+        (blob) =>
+          blob ? resolve(blob) : reject(new Error("Failed to process image")),
+        outputType,
+        outputType === "image/jpeg" ? quality : undefined
+      );
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Failed to load image"));
+    };
+    img.src = objectUrl;
+  });
+};
+
+/**
  * Get the first and last name from a full name
  * @param {string} fullName - Full name
  * @returns {Object} Object with firstName and lastName
@@ -374,6 +495,12 @@ export default {
   debounce,
   throttle,
   getInitials,
+  getAvatarSrc,
+  resizeImageFile,
+  getPasswordChecks,
+  isPasswordValid,
+  PASSWORD_SPECIAL_CHARS,
+  isValidNicknameFormat,
   isValidEmail,
   isValidUrl,
   safeJsonParse,

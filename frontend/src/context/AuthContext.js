@@ -1,6 +1,7 @@
 "use client";
 
 import { createContext, useContext, useState, useEffect } from "react";
+import { getDeviceFingerprint } from "@/utils/fingerprint";
 
 const AuthContext = createContext();
 
@@ -12,6 +13,7 @@ export function AuthProvider({ children }) {
     try {
       const response = await fetch("http://localhost:8081/api/check-auth", {
         credentials: "include",
+        headers: { "X-Device-Fingerprint": await getDeviceFingerprint() },
       });
       const data = await response.json();
       if (data.authenticated) {
@@ -40,6 +42,7 @@ export function AuthProvider({ children }) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          "X-Device-Fingerprint": await getDeviceFingerprint(),
         },
         credentials: "include",
         body: JSON.stringify({ email, password }),
@@ -65,7 +68,8 @@ export function AuthProvider({ children }) {
         method: "POST",
         credentials: "include",
       });
-      localStorage.removeItem("user");
+      localStorage.clear();
+      sessionStorage.clear();
       setUser(null);
       return { success: true };
     } catch (error) {

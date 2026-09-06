@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
+import { getAvatarSrc, isPasswordValid } from "@/utils/helpers";
+import PasswordRequirements from "@/components/PasswordRequirements";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -120,8 +122,8 @@ export default function SettingsPage() {
       setMessage("Passwords do not match");
       return;
     }
-    if (password.new.length < 8) {
-      setMessage("New password must be at least 8 characters");
+    if (!isPasswordValid(password.new)) {
+      setMessage("New password does not meet all requirements below");
       return;
     }
 
@@ -234,7 +236,7 @@ export default function SettingsPage() {
                 <div className='flex items-center gap-4'>
                   {user?.avatar_path ? (
                     <img
-                      src={`http://localhost:8081${user.avatar_path}`}
+                      src={getAvatarSrc(user.avatar_path)}
                       alt='Profile picture'
                       className='w-16 h-16 rounded-full object-cover border'
                     />
@@ -246,6 +248,8 @@ export default function SettingsPage() {
                   <label className='cursor-pointer px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition'>
                     {uploadingAvatar ? "Uploading..." : "Change Photo"}
                     <input
+                      id='settings-avatar-file'
+                      name='avatar'
                       type='file'
                       accept='image/jpeg,image/png,image/gif'
                       onChange={handleAvatarChange}
@@ -257,10 +261,13 @@ export default function SettingsPage() {
 
                 <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
                   <div>
-                    <label className='block text-sm font-medium text-gray-700 mb-1'>
+                    <label
+                      htmlFor='settings-first-name'
+                      className='block text-sm font-medium text-gray-700 mb-1'>
                       First Name
                     </label>
                     <input
+                      id='settings-first-name'
                       type='text'
                       name='firstName'
                       value={profile.firstName}
@@ -269,10 +276,13 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div>
-                    <label className='block text-sm font-medium text-gray-700 mb-1'>
+                    <label
+                      htmlFor='settings-last-name'
+                      className='block text-sm font-medium text-gray-700 mb-1'>
                       Last Name
                     </label>
                     <input
+                      id='settings-last-name'
                       type='text'
                       name='lastName'
                       value={profile.lastName}
@@ -283,10 +293,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  <label
+                    htmlFor='settings-email'
+                    className='block text-sm font-medium text-gray-700 mb-1'>
                     Email
                   </label>
                   <input
+                    id='settings-email'
                     type='email'
                     name='email'
                     value={profile.email}
@@ -296,10 +309,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  <label
+                    htmlFor='settings-bio'
+                    className='block text-sm font-medium text-gray-700 mb-1'>
                     Bio
                   </label>
                   <textarea
+                    id='settings-bio'
                     name='bio'
                     value={profile.bio}
                     onChange={handleProfileChange}
@@ -309,10 +325,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  <label
+                    htmlFor='settings-location'
+                    className='block text-sm font-medium text-gray-700 mb-1'>
                     Location
                   </label>
                   <input
+                    id='settings-location'
                     type='text'
                     name='location'
                     value={profile.location}
@@ -323,13 +342,16 @@ export default function SettingsPage() {
 
                 <div className='flex items-center space-x-2'>
                   <input
+                    id='settings-is-public'
                     type='checkbox'
                     name='isPublic'
                     checked={profile.isPublic}
                     onChange={handleProfileChange}
                     className='w-4 h-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500'
                   />
-                  <label className='text-sm text-gray-700'>
+                  <label
+                    htmlFor='settings-is-public'
+                    className='text-sm text-gray-700'>
                     Make my profile public
                   </label>
                 </div>
@@ -348,14 +370,17 @@ export default function SettingsPage() {
               <form onSubmit={handlePasswordSubmit} className='space-y-4'>
                 <h2 className='text-lg font-semibold'>Change Password</h2>
                 <p className='text-sm text-gray-500'>
-                  Password must be at least 8 characters long
+                  12 to 15 characters required
                 </p>
 
                 <div>
-                  <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  <label
+                    htmlFor='settings-current-password'
+                    className='block text-sm font-medium text-gray-700 mb-1'>
                     Current Password
                   </label>
                   <input
+                    id='settings-current-password'
                     type='password'
                     name='current'
                     value={password.current}
@@ -366,10 +391,13 @@ export default function SettingsPage() {
                 </div>
 
                 <div>
-                  <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  <label
+                    htmlFor='settings-new-password'
+                    className='block text-sm font-medium text-gray-700 mb-1'>
                     New Password
                   </label>
                   <input
+                    id='settings-new-password'
                     type='password'
                     name='new'
                     value={password.new}
@@ -377,13 +405,17 @@ export default function SettingsPage() {
                     className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
                     required
                   />
+                  <PasswordRequirements password={password.new} />
                 </div>
 
                 <div>
-                  <label className='block text-sm font-medium text-gray-700 mb-1'>
+                  <label
+                    htmlFor='settings-confirm-new-password'
+                    className='block text-sm font-medium text-gray-700 mb-1'>
                     Confirm New Password
                   </label>
                   <input
+                    id='settings-confirm-new-password'
                     type='password'
                     name='confirm'
                     value={password.confirm}
@@ -414,10 +446,13 @@ export default function SettingsPage() {
 
                 <div className='space-y-3'>
                   <div className='flex items-center justify-between'>
-                    <label className='text-sm text-gray-700'>
+                    <label
+                      htmlFor='settings-notif-email'
+                      className='text-sm text-gray-700'>
                       Email Notifications
                     </label>
                     <input
+                      id='settings-notif-email'
                       type='checkbox'
                       name='email'
                       checked={notifications.email}
@@ -426,10 +461,13 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className='flex items-center justify-between'>
-                    <label className='text-sm text-gray-700'>
+                    <label
+                      htmlFor='settings-notif-push'
+                      className='text-sm text-gray-700'>
                       Push Notifications
                     </label>
                     <input
+                      id='settings-notif-push'
                       type='checkbox'
                       name='push'
                       checked={notifications.push}
@@ -438,10 +476,13 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className='flex items-center justify-between'>
-                    <label className='text-sm text-gray-700'>
+                    <label
+                      htmlFor='settings-notif-follow'
+                      className='text-sm text-gray-700'>
                       Follow Notifications
                     </label>
                     <input
+                      id='settings-notif-follow'
                       type='checkbox'
                       name='follow'
                       checked={notifications.follow}
@@ -450,10 +491,13 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className='flex items-center justify-between'>
-                    <label className='text-sm text-gray-700'>
+                    <label
+                      htmlFor='settings-notif-messages'
+                      className='text-sm text-gray-700'>
                       Message Notifications
                     </label>
                     <input
+                      id='settings-notif-messages'
                       type='checkbox'
                       name='messages'
                       checked={notifications.messages}
@@ -462,10 +506,13 @@ export default function SettingsPage() {
                     />
                   </div>
                   <div className='flex items-center justify-between'>
-                    <label className='text-sm text-gray-700'>
+                    <label
+                      htmlFor='settings-notif-groups'
+                      className='text-sm text-gray-700'>
                       Group Notifications
                     </label>
                     <input
+                      id='settings-notif-groups'
                       type='checkbox'
                       name='groups'
                       checked={notifications.groups}

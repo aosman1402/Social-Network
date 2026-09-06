@@ -53,22 +53,6 @@ export default function HomePage() {
     checkAuth();
   }, [router]);
 
-  useEffect(() => {
-    async function loadPosts() {
-      try {
-        const res = await fetch("/api/posts");
-        if (!res.ok) throw new Error(`Failed to fetch posts: ${res.status}`);
-        const data = await res.json();
-        setPosts(data);
-      } catch (err) {
-        // Log the error and update UI state to show an error message to the user
-        console.error(err.message);
-        setErrorState(true);
-      }
-    }
-    loadPosts();
-  }, []);
-
   const handlePostCreated = () => {
     fetchPosts();
   };

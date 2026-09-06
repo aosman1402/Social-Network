@@ -24,15 +24,6 @@ export default function LoginPage() {
       return;
     }
 
-    const response = await fetch("http://localhost:8081/api/login", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include", // ✅ This sends the cookie
-      body: JSON.stringify({ email, password }),
-    });
-
     try {
       const result = await login(email, password);
 
@@ -58,10 +49,14 @@ export default function LoginPage() {
 
         <form onSubmit={handleSubmit} className='space-y-4'>
           <div>
-            <label className='block text-sm font-medium text-gray-700 mb-1'>
+            <label
+              htmlFor='login-email'
+              className='block text-sm font-medium text-gray-700 mb-1'>
               Email
             </label>
             <input
+              id='login-email'
+              name='email'
               type='email'
               autoComplete='email'
               value={email}
@@ -73,10 +68,14 @@ export default function LoginPage() {
           </div>
 
           <div>
-            <label className='block text-sm font-medium text-gray-700 mb-1'>
+            <label
+              htmlFor='login-password'
+              className='block text-sm font-medium text-gray-700 mb-1'>
               Password
             </label>
             <input
+              id='login-password'
+              name='password'
               type='password'
               autoComplete='current-password'
               value={password}

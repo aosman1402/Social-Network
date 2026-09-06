@@ -3,6 +3,7 @@ package middleware
 import (
     "context"
     "database/sql"
+    "log"
     "net/http"
     "time"
 )
@@ -10,6 +11,12 @@ import (
 type contextKey string
 
 const UserIDKey contextKey = "userID"
+
+// DeviceFingerprintHeader carries a client-computed device fingerprint
+// (e.g. from FingerprintJS). Only requests that actually send it participate
+// in the mismatch check below - most existing API calls don't send it, and
+// are simply not checked, rather than being penalized for its absence.
+const DeviceFingerprintHeader = "X-Device-Fingerprint"
 
 type AuthMiddleware struct {
     DB *sql.DB
@@ -25,10 +32,11 @@ func (am *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
 
         var userID int64
         var expiresAt time.Time
+        var storedIP, storedFingerprint sql.NullString
         err = am.DB.QueryRow(
-            "SELECT user_id, expires_at FROM sessions WHERE session_token = ?",
+            "SELECT user_id, expires_at, ip_address, fingerprint FROM sessions WHERE session_token = ?",
             cookie.Value,
-        ).Scan(&userID, &expiresAt)
+        ).Scan(&userID, &expiresAt, &storedIP, &storedFingerprint)
 
         if err != nil {
             http.Error(w, "Unauthorized", http.StatusUnauthorized)
@@ -40,6 +48,23 @@ func (am *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
             am.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
             http.Error(w, "Session expired", http.StatusUnauthorized)
             return
+        }
+
+        // A fingerprint mismatch is a strong signal the cookie is being used
+        // from a different device than the one that logged in - invalidate
+        // immediately.
+        if fp := r.Header.Get(DeviceFingerprintHeader); fp != "" &&
+            storedFingerprint.Valid && storedFingerprint.String != "" &&
+            fp != storedFingerprint.String {
+            am.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
+            http.Error(w, "Session invalidated", http.StatusUnauthorized)
+            return
+        }
+
+        // IP changes are common and often legitimate (mobile networks,
+        // Wi-Fi switching) - logged for visibility rather than invalidated.
+        if ip := ClientIP(r); storedIP.Valid && storedIP.String != "" && ip != storedIP.String {
+            log.Printf("[security] session for user %d: IP changed from %s to %s", userID, storedIP.String, ip)
         }
 
         ctx := context.WithValue(r.Context(), UserIDKey, userID)
