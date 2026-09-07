@@ -1,0 +1,31 @@
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "8081:8081"
+    volumes:
+      - backend-db:/app/pkg/db/sqlite
+      - backend-uploads:/app/uploads
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked in at `next build` time (rewrites() is frozen into the
+        # build output, so this can't be a plain runtime env var) - lets
+        # the Next.js server reach the backend container by its compose
+        # service name when proxying /api/*. The browser still talks to
+        # the backend directly at http://localhost:8081 (see the exposed
+        # port above), since the frontend code hardcodes that origin for
+        # most calls.
+        BACKEND_INTERNAL_URL: http://backend:8081
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  backend-db:
+  backend-uploads:

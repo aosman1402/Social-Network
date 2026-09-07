@@ -1,0 +1,6 @@
+uploads/
+pkg/db/sqlite/*.db
+pkg/db/sqlite/*.db-*
+*.log
+.git
+.gitignore
