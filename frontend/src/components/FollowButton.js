@@ -11,7 +11,6 @@ export default function FollowButton({
   const [isFollowing, setIsFollowing] = useState(initialIsFollowing || false);
   const [isPending, setIsPending] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showConfirm, setShowConfirm] = useState(false);
 
   useEffect(() => {
     setIsFollowing(initialIsFollowing || false);
@@ -82,53 +81,27 @@ export default function FollowButton({
       toast.error("Failed to unfollow user");
     } finally {
       setLoading(false);
-      setShowConfirm(false);
     }
-  };
-
-  const handleUnfollowClick = () => {
-    setShowConfirm(true);
-  };
-
-  const handleCancelUnfollow = () => {
-    setShowConfirm(false);
   };
 
   if (isPending) {
     return (
       <button
-        disabled
-        className='px-4 py-2 bg-yellow-500 text-white rounded-lg cursor-not-allowed opacity-70'>
+        onClick={handleUnfollow}
+        disabled={loading}
+        title='Cancel follow request'
+        className='px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg hover:bg-red-100 hover:text-red-700 transition'>
         <span className='flex items-center space-x-2'>
           <span>⏳</span>
-          <span>Pending...</span>
+          <span>{loading ? "Cancelling..." : "Pending · Cancel"}</span>
         </span>
       </button>
     );
   }
 
-  if (showConfirm) {
-    return (
-      <div className='flex items-center space-x-2'>
-        <span className='text-sm text-gray-600'>Unfollow?</span>
-        <button
-          onClick={handleUnfollow}
-          disabled={loading}
-          className='px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm'>
-          Yes
-        </button>
-        <button
-          onClick={handleCancelUnfollow}
-          className='px-3 py-1 bg-gray-300 text-gray-700 rounded hover:bg-gray-400 text-sm'>
-          No
-        </button>
-      </div>
-    );
-  }
-
   return (
     <button
-      onClick={isFollowing ? handleUnfollowClick : handleFollow}
+      onClick={isFollowing ? handleUnfollow : handleFollow}
       disabled={loading}
       className={`px-4 py-2 rounded-lg font-medium transition flex items-center space-x-2 ${
         isFollowing

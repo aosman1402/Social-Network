@@ -18,7 +18,7 @@ type Message struct {
 type Notification struct {
     ID        int64     `json:"id"`
     UserID    int64     `json:"user_id"`
-    Type      string    `json:"type"` // follow_request, group_invitation, group_request, event_created
+    Type      string    `json:"type"` // follow_request, follow_accepted, new_follower, group_invitation, group_request, event_created
     Content   string    `json:"content"`
     IsRead    bool      `json:"is_read"`
     RelatedID *int64    `json:"related_id"`

@@ -87,6 +87,7 @@ export default function NotificationsPage() {
     switch (type) {
       case "follow_request":
       case "follow_accepted":
+      case "new_follower":
         return "👤";
       case "group_invitation":
         return "👥";
@@ -155,6 +156,7 @@ export default function NotificationsPage() {
                   switch (notification.type) {
                     case "follow_request":
                     case "follow_accepted":
+                    case "new_follower":
                       router.push(`/profile/${notification.related_id}`);
                       break;
                     case "group_invitation":

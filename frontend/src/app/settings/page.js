@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
@@ -9,21 +9,62 @@ import PasswordRequirements from "@/components/PasswordRequirements";
 
 export default function SettingsPage() {
   const router = useRouter();
-  const { user, setUser } = useAuth();
+  const { user, setUser, loading: authLoading } = useAuth();
   const [activeTab, setActiveTab] = useState("profile");
   const [isLoading, setIsLoading] = useState(false);
   const [message, setMessage] = useState("");
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  // Profile settings
+  // Profile settings - starts empty and is populated from the real
+  // logged-in user's profile once it loads (see the effect below), instead
+  // of shipping hardcoded placeholder data.
   const [profile, setProfile] = useState({
-    firstName: "John",
-    lastName: "Doe",
-    email: "john@example.com",
-    bio: "Software developer and tech enthusiast",
-    location: "San Francisco, CA",
+    firstName: "",
+    lastName: "",
+    email: "",
+    bio: "",
     isPublic: true,
   });
+  const [profileLoaded, setProfileLoaded] = useState(false);
+
+  // Redirect signed-out visitors, and load this user's real profile
+  // (first/last name, about_me, is_public) from the same endpoint the
+  // profile page uses - /api/check-auth doesn't carry about_me.
+  useEffect(() => {
+    if (authLoading) return;
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+
+    const loadProfile = async () => {
+      try {
+        const response = await fetch(
+          `http://localhost:8081/api/user/profile?id=${user.id}`,
+          { credentials: "include" },
+        );
+        if (response.ok) {
+          const data = await response.json();
+          setProfile({
+            firstName: data.first_name || "",
+            lastName: data.last_name || "",
+            email: data.email || "",
+            bio: data.about_me || "",
+            isPublic: !!data.is_public,
+          });
+        } else {
+          toast.error("Failed to load profile");
+        }
+      } catch (error) {
+        console.error("Error loading profile:", error);
+        toast.error("Failed to load profile");
+      } finally {
+        setProfileLoaded(true);
+      }
+    };
+
+    loadProfile();
+  }, [user, authLoading, router]);
 
   // Password settings
   const [password, setPassword] = useState({
@@ -104,16 +145,49 @@ export default function SettingsPage() {
     setNotifications({ ...notifications, [name]: checked });
   };
 
-  const handleProfileSubmit = (e) => {
+  const handleProfileSubmit = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     setMessage("");
 
-    // Simulate API call
-    setTimeout(() => {
+    try {
+      const response = await fetch("http://localhost:8081/api/user/update", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          first_name: profile.firstName,
+          last_name: profile.lastName,
+          about_me: profile.bio,
+          is_public: profile.isPublic,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setMessage(data.error || "Failed to update profile");
+        return;
+      }
+
       setMessage("Profile updated successfully!");
+      // Keep the shared auth user (navbar, profile page, etc.) in sync.
+      setUser((prev) =>
+        prev
+          ? {
+              ...prev,
+              first_name: profile.firstName,
+              last_name: profile.lastName,
+              is_public: profile.isPublic,
+            }
+          : prev,
+      );
+    } catch (error) {
+      console.error("Error updating profile:", error);
+      setMessage("Failed to update profile");
+    } finally {
       setIsLoading(false);
-    }, 1000);
+    }
   };
 
   const handlePasswordSubmit = async (e) => {
@@ -303,8 +377,10 @@ export default function SettingsPage() {
                     type='email'
                     name='email'
                     value={profile.email}
-                    onChange={handleProfileChange}
-                    className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
+                    disabled
+                    readOnly
+                    title="Email can't be changed here"
+                    className='w-full px-3 py-2 border border-gray-300 rounded-lg bg-gray-50 text-gray-500 cursor-not-allowed'
                   />
                 </div>
 
@@ -312,7 +388,7 @@ export default function SettingsPage() {
                   <label
                     htmlFor='settings-bio'
                     className='block text-sm font-medium text-gray-700 mb-1'>
-                    Bio
+                    About Me
                   </label>
                   <textarea
                     id='settings-bio'
@@ -321,22 +397,6 @@ export default function SettingsPage() {
                     onChange={handleProfileChange}
                     rows='3'
                     className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none'
-                  />
-                </div>
-
-                <div>
-                  <label
-                    htmlFor='settings-location'
-                    className='block text-sm font-medium text-gray-700 mb-1'>
-                    Location
-                  </label>
-                  <input
-                    id='settings-location'
-                    type='text'
-                    name='location'
-                    value={profile.location}
-                    onChange={handleProfileChange}
-                    className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
                   />
                 </div>
 
@@ -358,9 +418,13 @@ export default function SettingsPage() {
 
                 <button
                   type='submit'
-                  disabled={isLoading}
+                  disabled={isLoading || !profileLoaded}
                   className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50'>
-                  {isLoading ? "Saving..." : "Save Profile"}
+                  {isLoading
+                    ? "Saving..."
+                    : !profileLoaded
+                      ? "Loading..."
+                      : "Save Profile"}
                 </button>
               </form>
             )}

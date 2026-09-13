@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
+import FollowRequests from "@/components/FollowRequests";
+import Avatar from "@/components/Avatar";
 
 export default function ProfileDetailPage() {
   const params = useParams();
@@ -21,18 +23,18 @@ export default function ProfileDetailPage() {
   const [isOwnProfile, setIsOwnProfile] = useState(false);
 
   // ✅ Format date function
-  const formatDate = (dateString) => {
-    if (!dateString) return "Recently joined";
+  const formatDate = (dateString, fallback = "Recently joined") => {
+    if (!dateString) return fallback;
     try {
       const date = new Date(dateString);
-      if (isNaN(date.getTime())) return "Recently joined";
+      if (isNaN(date.getTime())) return fallback;
       return date.toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
         day: "numeric",
       });
     } catch {
-      return "Recently joined";
+      return fallback;
     }
   };
 
@@ -170,12 +172,16 @@ export default function ProfileDetailPage() {
     }
   };
 
-  // ✅ Handle follow/unfollow
+  // ✅ Handle follow/unfollow - also covers cancelling a still-pending
+  // request to a private account, and unfollows directly (no separate
+  // confirm step) since the backend already applies it immediately.
   const handleFollowToggle = async () => {
     if (!profile) return;
 
+    const wasFollowingOrPending = profile.is_following || profile.is_pending;
+
     try {
-      const url = profile.is_following
+      const url = wasFollowingOrPending
         ? "http://localhost:8081/api/user/unfollow"
         : "http://localhost:8081/api/user/follow";
 
@@ -191,27 +197,35 @@ export default function ProfileDetailPage() {
       const data = await response.json();
 
       if (response.ok) {
-        // Update profile state
-        setProfile({
-          ...profile,
-          is_following: !profile.is_following,
-          followers_count: profile.is_following
-            ? profile.followers_count - 1
-            : profile.followers_count + 1,
-        });
-
-        // Update followers list
-        if (!profile.is_following) {
-          // Followed - add user to followers list if they have public profile
-          setFollowers([...followers, { user: currentUser }]);
+        if (wasFollowingOrPending) {
+          // Unfollowed (or cancelled a pending request).
+          setProfile({
+            ...profile,
+            is_following: false,
+            is_pending: false,
+            // Only an accepted follow ever counted towards followers_count.
+            followers_count: profile.is_following
+              ? profile.followers_count - 1
+              : profile.followers_count,
+          });
+          setFollowers(
+            followers.filter((f) => f.user.id !== currentUser.id),
+          );
+          toast.success(data.message || "Unfollowed");
+        } else if (data.status === "pending") {
+          // Private account - request sent, not yet accepted. Don't count
+          // it as a follower yet.
+          setProfile({ ...profile, is_pending: true });
+          toast.success(data.message || "Follow request sent");
         } else {
-          // Unfollowed - remove user from followers list
-          setFollowers(followers.filter((f) => f.user.id !== currentUser.id));
+          setProfile({
+            ...profile,
+            is_following: true,
+            followers_count: profile.followers_count + 1,
+          });
+          setFollowers([...followers, { user: currentUser }]);
+          toast.success(data.message || "Followed");
         }
-
-        toast.success(
-          data.message || (profile.is_following ? "Unfollowed" : "Followed"),
-        );
       } else {
         toast.error(data.error || "Failed to update follow status");
       }
@@ -219,6 +233,61 @@ export default function ProfileDetailPage() {
       console.error("Error toggling follow:", error);
       toast.error("Failed to update follow status");
     }
+  };
+
+  // ✅ One-click public/private toggle, right on the profile page - the
+  // account was previously only switchable from a Settings form that never
+  // actually called the backend. UpdateProfile overwrites first/last
+  // name + about_me + is_public together, so the current values have to be
+  // sent along even though only is_public is changing here.
+  const [togglingPrivacy, setTogglingPrivacy] = useState(false);
+  const handleTogglePrivacy = async () => {
+    if (!profile || togglingPrivacy) return;
+    const newIsPublic = !profile.is_public;
+    setTogglingPrivacy(true);
+
+    try {
+      const response = await fetch("http://localhost:8081/api/user/update", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          first_name: profile.first_name,
+          last_name: profile.last_name,
+          about_me: profile.about_me || "",
+          is_public: newIsPublic,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        setProfile({ ...profile, is_public: newIsPublic });
+        toast.success(
+          newIsPublic
+            ? "Your profile is now public"
+            : "Your profile is now private",
+        );
+      } else {
+        toast.error(data.error || "Failed to update privacy");
+      }
+    } catch (error) {
+      console.error("Error toggling privacy:", error);
+      toast.error("Failed to update privacy");
+    } finally {
+      setTogglingPrivacy(false);
+    }
+  };
+
+  // ✅ Called by FollowRequests after accepting/declining an incoming
+  // request, so the followers list/count update in place instead of a
+  // full page reload.
+  const handleFollowRequestHandled = (action, follower) => {
+    if (action !== "accept" || !follower) return;
+    setProfile((prev) =>
+      prev ? { ...prev, followers_count: prev.followers_count + 1 } : prev,
+    );
+    setFollowers((prev) => [...prev, { user: follower }]);
   };
 
   // ✅ Loading state
@@ -272,9 +341,8 @@ export default function ProfileDetailPage() {
         <div className='px-6 pb-6'>
           <div className='flex flex-col md:flex-row items-start md:items-end -mt-12 mb-4'>
             {/* Avatar */}
-            <div className='w-24 h-24 rounded-full border-4 border-white bg-blue-500 flex items-center justify-center text-white text-3xl font-bold shadow-lg'>
-              {profile.first_name?.[0]}
-              {profile.last_name?.[0]}
+            <div className='rounded-full border-4 border-white shadow-lg'>
+              <Avatar user={profile} size='2xl' />
             </div>
 
             {/* User Info */}
@@ -309,26 +377,58 @@ export default function ProfileDetailPage() {
                 <span className='text-sm text-gray-500'>
                   📅 Joined {formatDate(profile.created_at)}
                 </span>
+                {profile.date_of_birth && (
+                  <span className='text-sm text-gray-500'>
+                    🎂 Born {formatDate(profile.date_of_birth, "Unknown")}
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Follow / Edit Button */}
-            <div className='mt-4 md:mt-0'>
+            <div className='mt-4 md:mt-0 flex items-center gap-2'>
               {isOwnProfile ? (
-                <button
-                  onClick={() => router.push("/settings")}
-                  className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
-                  Edit Profile
-                </button>
+                <>
+                  <button
+                    onClick={() => router.push("/settings")}
+                    className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
+                    Edit Profile
+                  </button>
+                  <button
+                    onClick={handleTogglePrivacy}
+                    disabled={togglingPrivacy}
+                    title={
+                      profile.is_public
+                        ? "Switch to a private profile"
+                        : "Switch to a public profile"
+                    }
+                    className={`px-4 py-2 rounded-lg font-medium transition disabled:opacity-50 ${
+                      profile.is_public
+                        ? "bg-green-100 text-green-700 hover:bg-yellow-100 hover:text-yellow-800"
+                        : "bg-yellow-100 text-yellow-800 hover:bg-green-100 hover:text-green-700"
+                    }`}>
+                    {togglingPrivacy
+                      ? "Saving..."
+                      : profile.is_public
+                        ? "🌍 Public"
+                        : "🔒 Private"}
+                  </button>
+                </>
               ) : (
                 <button
                   onClick={handleFollowToggle}
                   className={`px-4 py-2 rounded-lg font-medium transition ${
                     profile.is_following
                       ? "bg-gray-200 text-gray-700 hover:bg-gray-300"
-                      : "bg-blue-500 text-white hover:bg-blue-600"
+                      : profile.is_pending
+                        ? "bg-yellow-100 text-yellow-800 hover:bg-red-100 hover:text-red-700"
+                        : "bg-blue-500 text-white hover:bg-blue-600"
                   }`}>
-                  {profile.is_following ? "Following" : "Follow"}
+                  {profile.is_following
+                    ? "Following"
+                    : profile.is_pending
+                      ? "Pending · Cancel"
+                      : "Follow"}
                 </button>
               )}
             </div>
@@ -392,6 +492,17 @@ export default function ProfileDetailPage() {
             }`}>
             Following ({profile.following_count || 0})
           </button>
+          {isOwnProfile && (
+            <button
+              onClick={() => setActiveTab("requests")}
+              className={`flex-1 py-3 text-sm font-medium transition ${
+                activeTab === "requests"
+                  ? "text-blue-600 border-b-2 border-blue-600"
+                  : "text-gray-500 hover:text-gray-700"
+              }`}>
+              Requests
+            </button>
+          )}
         </div>
 
         <div className='p-4'>
@@ -520,6 +631,11 @@ export default function ProfileDetailPage() {
                 ))
               )}
             </div>
+          )}
+
+          {/* Requests Tab (own profile only) */}
+          {isOwnProfile && activeTab === "requests" && (
+            <FollowRequests onRequestHandled={handleFollowRequestHandled} />
           )}
         </div>
       </div>

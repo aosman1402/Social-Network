@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
@@ -233,12 +234,18 @@ export default function PostCard({ post, onUpdate, onDelete }) {
       {/* Post Header */}
       <div className='flex items-start justify-between'>
         <div className='flex items-start space-x-3'>
-          <div className='w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold'>
-            {post.user?.first_name?.[0] || "U"}
-          </div>
+          <Link href={`/profile/${post.user_id}`}>
+            <div className='w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold hover:opacity-80'>
+              {post.user?.first_name?.[0] || "U"}
+            </div>
+          </Link>
           <div>
             <p className='font-semibold'>
-              {post.user?.first_name} {post.user?.last_name}
+              <Link
+                href={`/profile/${post.user_id}`}
+                className='hover:underline'>
+                {post.user?.first_name} {post.user?.last_name}
+              </Link>
             </p>
             <p className='text-sm text-gray-500'>
               {formatDate(post.created_at)}
@@ -369,12 +376,18 @@ export default function PostCard({ post, onUpdate, onDelete }) {
             ) : (
               comments.map((comment) => (
                 <div key={comment.id} className='flex items-start space-x-2'>
-                  <div className='w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold'>
-                    {comment.user?.first_name?.[0] || "U"}
-                  </div>
+                  <Link href={`/profile/${comment.user_id}`}>
+                    <div className='w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold hover:opacity-80'>
+                      {comment.user?.first_name?.[0] || "U"}
+                    </div>
+                  </Link>
                   <div className='flex-1'>
                     <p className='text-sm font-semibold'>
-                      {comment.user?.first_name} {comment.user?.last_name}
+                      <Link
+                        href={`/profile/${comment.user_id}`}
+                        className='hover:underline'>
+                        {comment.user?.first_name} {comment.user?.last_name}
+                      </Link>
                     </p>
                     <p className='text-sm'>{comment.content}</p>
                     {comment.image_path && (

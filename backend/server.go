@@ -57,7 +57,7 @@ func main() {
 
     // Initialize handlers
     authHandler := &handlers.AuthHandler{DB: db.DB}
-    userHandler := &handlers.UserHandler{DB: db.DB}
+    userHandler := &handlers.UserHandler{DB: db.DB, Hub: hub}
     postHandler := &handlers.PostHandler{DB: db.DB}
     groupHandler := &handlers.GroupHandler{DB: db.DB}
     wsHandler := &handlers.WebSocketHandler{

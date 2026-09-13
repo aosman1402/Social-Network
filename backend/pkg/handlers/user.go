@@ -9,10 +9,77 @@ import (
 
     "social-network3/pkg/middleware"
     "social-network3/pkg/models"
+    "social-network3/pkg/websocket"
 )
 
 type UserHandler struct {
-    DB *sql.DB
+    DB  *sql.DB
+    Hub *websocket.Hub
+}
+
+// notifyUser pushes a notification to userID's live websocket connection(s),
+// if any are open, so the frontend can show it immediately instead of
+// waiting for the next page load/poll of /api/notifications. Hub is nil in
+// contexts (e.g. tests) that don't wire one up, and BroadcastToRoom is a
+// no-op when nobody is connected to that room, so this is always safe to call.
+func (uh *UserHandler) notifyUser(userID int64, notification map[string]interface{}) {
+    if uh.Hub == nil {
+        return
+    }
+
+    payload, err := json.Marshal(notification)
+    if err != nil {
+        return
+    }
+
+    message, err := json.Marshal(map[string]interface{}{
+        "type": "notification",
+        "data": string(payload),
+    })
+    if err != nil {
+        return
+    }
+
+    uh.Hub.BroadcastToRoom("user_"+strconv.FormatInt(userID, 10), message)
+}
+
+// hasAcceptedFollow reports whether followerID has an accepted follow of
+// followingID.
+func (uh *UserHandler) hasAcceptedFollow(followerID, followingID int64) (bool, error) {
+    var status string
+    err := uh.DB.QueryRow(
+        "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+        followerID, followingID,
+    ).Scan(&status)
+    if err == sql.ErrNoRows {
+        return false, nil
+    }
+    if err != nil {
+        return false, err
+    }
+    return status == "accepted", nil
+}
+
+// canViewAccount reports whether viewerID may see targetID's private
+// account details - profile fields, followers/following lists, and
+// non-public posts. True for the account owner, anyone viewing a public
+// account, or an accepted follower of a private one.
+func (uh *UserHandler) canViewAccount(viewerID, targetID int64) (bool, error) {
+    if viewerID == targetID {
+        return true, nil
+    }
+
+    var isPublic bool
+    if err := uh.DB.QueryRow(
+        "SELECT is_public FROM users WHERE id = ?", targetID,
+    ).Scan(&isPublic); err != nil {
+        return false, err
+    }
+    if isPublic {
+        return true, nil
+    }
+
+    return uh.hasAcceptedFollow(viewerID, targetID)
 }
 
 type UserProfile struct {
@@ -77,6 +144,21 @@ func (uh *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 
     user.IsPublic = isPublic
 
+    // Private accounts are only visible to themselves and their accepted
+    // followers - everyone else gets a 403, matching the frontend's
+    // existing (previously unreachable) "This profile is private" handling.
+    if !isPublic && currentUserID != userID {
+        accepted, err := uh.hasAcceptedFollow(currentUserID, userID)
+        if err != nil {
+            http.Error(w, "Failed to verify access", http.StatusInternalServerError)
+            return
+        }
+        if !accepted {
+            http.Error(w, "This profile is private", http.StatusForbidden)
+            return
+        }
+    }
+
     // Get followers count
     var followersCount int
     uh.DB.QueryRow(
@@ -98,15 +180,19 @@ func (uh *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
         userID,
     ).Scan(&postsCount)
 
-    // Check if current user is following this user
-    var isFollowing bool
+    // Check if current user is following this user, or has a follow
+    // request pending on them (private accounts require acceptance).
+    var isFollowing, isPending bool
     if currentUserID != userID {
-        var count int
-        uh.DB.QueryRow(
-            "SELECT COUNT(*) FROM follows WHERE follower_id = ? AND following_id = ? AND status = 'accepted'",
+        var status string
+        err := uh.DB.QueryRow(
+            "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
             currentUserID, userID,
-        ).Scan(&count)
-        isFollowing = count > 0
+        ).Scan(&status)
+        if err == nil {
+            isFollowing = status == "accepted"
+            isPending = status == "pending"
+        }
     }
 
     response := map[string]interface{}{
@@ -125,6 +211,7 @@ func (uh *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
         "following_count": followingCount,
         "posts_count":     postsCount,
         "is_following":    isFollowing,
+        "is_pending":      isPending,
         "is_followed_by":  false,
     }
 
@@ -279,18 +366,39 @@ func (uh *UserHandler) FollowUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    if !isPublic {
-        var followerName string
-        uh.DB.QueryRow(
-            "SELECT first_name || ' ' || last_name FROM users WHERE id = ?",
-            followerID,
-        ).Scan(&followerName)
+    // Let the followed user know either way: a request to act on (private
+    // account) or simply that they gained a follower (public account) -
+    // previously only the private-account case notified anyone.
+    var followerName string
+    uh.DB.QueryRow(
+        "SELECT first_name || ' ' || last_name FROM users WHERE id = ?",
+        followerID,
+    ).Scan(&followerName)
 
-        uh.DB.Exec(
-            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
-             VALUES (?, 'follow_request', ?, ?, ?)`,
-            req.UserID, followerName+" requested to follow you", followerID, time.Now(),
-        )
+    notifType := "new_follower"
+    content := followerName + " started following you"
+    if !isPublic {
+        notifType = "follow_request"
+        content = followerName + " requested to follow you"
+    }
+
+    createdAt := time.Now()
+    result, err := uh.DB.Exec(
+        `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        req.UserID, notifType, content, followerID, createdAt,
+    )
+    if err == nil {
+        notificationID, _ := result.LastInsertId()
+        uh.notifyUser(req.UserID, map[string]interface{}{
+            "id":         notificationID,
+            "user_id":    req.UserID,
+            "type":       notifType,
+            "content":    content,
+            "is_read":    false,
+            "related_id": followerID,
+            "created_at": createdAt,
+        })
     }
 
     var message string
@@ -398,11 +506,25 @@ func (uh *UserHandler) HandleFollowRequest(w http.ResponseWriter, r *http.Reques
             userID,
         ).Scan(&userName)
 
-        uh.DB.Exec(
+        content := userName + " accepted your follow request"
+        createdAt := time.Now()
+        result, err := uh.DB.Exec(
             `INSERT INTO notifications (user_id, type, content, related_id, created_at)
              VALUES (?, 'follow_accepted', ?, ?, ?)`,
-            req.FollowerID, userName+" accepted your follow request", userID, time.Now(),
+            req.FollowerID, content, userID, createdAt,
         )
+        if err == nil {
+            notificationID, _ := result.LastInsertId()
+            uh.notifyUser(req.FollowerID, map[string]interface{}{
+                "id":         notificationID,
+                "user_id":    req.FollowerID,
+                "type":       "follow_accepted",
+                "content":    content,
+                "is_read":    false,
+                "related_id": userID,
+                "created_at": createdAt,
+            })
+        }
     }
 
     json.NewEncoder(w).Encode(map[string]string{
@@ -464,10 +586,21 @@ func (uh *UserHandler) GetFollowRequests(w http.ResponseWriter, r *http.Request)
 
 // GetFollowers - Get list of followers
 func (uh *UserHandler) GetFollowers(w http.ResponseWriter, r *http.Request) {
+    currentUserID, _ := middleware.GetUserID(r)
     userIDStr := r.URL.Query().Get("id")
     userID, err := strconv.ParseInt(userIDStr, 10, 64)
     if err != nil {
         http.Error(w, "Invalid user ID", http.StatusBadRequest)
+        return
+    }
+
+    canView, err := uh.canViewAccount(currentUserID, userID)
+    if err != nil {
+        http.Error(w, "Failed to verify access", http.StatusInternalServerError)
+        return
+    }
+    if !canView {
+        http.Error(w, "This profile is private", http.StatusForbidden)
         return
     }
 
@@ -517,10 +650,21 @@ func (uh *UserHandler) GetFollowers(w http.ResponseWriter, r *http.Request) {
 
 // GetFollowing - Get list of users being followed
 func (uh *UserHandler) GetFollowing(w http.ResponseWriter, r *http.Request) {
+    currentUserID, _ := middleware.GetUserID(r)
     userIDStr := r.URL.Query().Get("id")
     userID, err := strconv.ParseInt(userIDStr, 10, 64)
     if err != nil {
         http.Error(w, "Invalid user ID", http.StatusBadRequest)
+        return
+    }
+
+    canView, err := uh.canViewAccount(currentUserID, userID)
+    if err != nil {
+        http.Error(w, "Failed to verify access", http.StatusInternalServerError)
+        return
+    }
+    if !canView {
+        http.Error(w, "This profile is private", http.StatusForbidden)
         return
     }
 
@@ -570,6 +714,7 @@ func (uh *UserHandler) GetFollowing(w http.ResponseWriter, r *http.Request) {
 
 // GetUserPosts - Get posts by a specific user
 func (uh *UserHandler) GetUserPosts(w http.ResponseWriter, r *http.Request) {
+    currentUserID, _ := middleware.GetUserID(r)
     userIDStr := r.URL.Query().Get("id")
     userID, err := strconv.ParseInt(userIDStr, 10, 64)
     if err != nil {
@@ -577,17 +722,43 @@ func (uh *UserHandler) GetUserPosts(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    canView, err := uh.canViewAccount(currentUserID, userID)
+    if err != nil {
+        http.Error(w, "Failed to verify access", http.StatusInternalServerError)
+        return
+    }
+    if !canView {
+        http.Error(w, "This profile is private", http.StatusForbidden)
+        return
+    }
+
+    // Even for a viewable (public, or accepted-follower) account, each post
+    // carries its own privacy_level - mirrors the same rule GetPosts (the
+    // main feed) applies: public to everyone, almost_private to accepted
+    // followers of the author, private/anything else to the author only.
     rows, err := uh.DB.Query(`
-        SELECT p.id, p.user_id, p.content, p.image_path, p.privacy_level, p.group_id, 
+        SELECT p.id, p.user_id, p.content, p.image_path, p.privacy_level, p.group_id,
                p.created_at, p.updated_at,
                u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path, u.is_public,
                (SELECT COUNT(*) FROM comments c WHERE c.post_id = p.id) as comment_count
         FROM posts p
         JOIN users u ON p.user_id = u.id
         WHERE p.user_id = ?
+          AND (
+              p.privacy_level = 'public'
+              OR p.user_id = ?
+              OR (p.privacy_level = 'almost_private' AND EXISTS (
+                  SELECT 1 FROM follows
+                  WHERE follower_id = ? AND following_id = p.user_id AND status = 'accepted'
+              ))
+              OR (p.privacy_level = 'private' AND EXISTS (
+                  SELECT 1 FROM post_allowed_users
+                  WHERE post_id = p.id AND user_id = ?
+              ))
+          )
         ORDER BY p.created_at DESC
         LIMIT 50
-    `, userID)
+    `, userID, currentUserID, currentUserID, currentUserID)
 
     if err != nil {
         http.Error(w, "Failed to get user posts", http.StatusInternalServerError)
@@ -611,16 +782,16 @@ func (uh *UserHandler) GetUserPosts(w http.ResponseWriter, r *http.Request) {
             continue
         }
         posts = append(posts, map[string]interface{}{
-            "id":             post.ID,
-            "user_id":        post.UserID,
-            "content":        post.Content,
-            "image_path":     post.ImagePath,
-            "privacy_level":  post.PrivacyLevel,
-            "group_id":       post.GroupID,
-            "created_at":     post.CreatedAt,
-            "updated_at":     post.UpdatedAt,
-            "user":           user,
-            "comment_count":  commentCount,
+            "id":            post.ID,
+            "user_id":       post.UserID,
+            "content":       post.Content,
+            "image_path":    post.ImagePath,
+            "privacy_level": post.PrivacyLevel,
+            "group_id":      post.GroupID,
+            "created_at":    post.CreatedAt,
+            "updated_at":    post.UpdatedAt,
+            "user":          user,
+            "comment_count": commentCount,
         })
     }
 

@@ -125,6 +125,13 @@ func (ah *AuthHandler) nicknameTaken(nickname string) (bool, error) {
     return count > 0, err
 }
 
+// emailTaken reports whether email is already registered to a user.
+func (ah *AuthHandler) emailTaken(email string) (bool, error) {
+    var count int
+    err := ah.DB.QueryRow("SELECT COUNT(*) FROM users WHERE email = ?", email).Scan(&count)
+    return count > 0, err
+}
+
 // CheckNickname reports whether a nickname is well-formed and not already
 // taken. Public (no auth required) - it's used while filling out the
 // registration form, before an account (and therefore a session) exists.
@@ -207,6 +214,22 @@ func (ah *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    taken, err := ah.emailTaken(req.Email)
+    if err != nil {
+        w.WriteHeader(http.StatusInternalServerError)
+        json.NewEncoder(w).Encode(map[string]string{
+            "error": "Failed to validate email",
+        })
+        return
+    }
+    if taken {
+        w.WriteHeader(http.StatusConflict)
+        json.NewEncoder(w).Encode(map[string]string{
+            "error": "Email already in use",
+        })
+        return
+    }
+
     // Enforce the same policy the frontend advertises and checks live -
     // client-side validation alone doesn't stop a direct API call with a
     // weak password.
@@ -276,10 +299,28 @@ func (ah *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
         req.AvatarPath, req.Nickname, req.AboutMe,
     )
     if err != nil {
-        w.WriteHeader(http.StatusInternalServerError)
-        json.NewEncoder(w).Encode(map[string]string{
-            "error": "Failed to create user: " + err.Error(),
-        })
+        // The pre-checks above cover the common case; this only fires on a
+        // race (two requests for the same email/nickname landing at once).
+        // Map that to the same clean messages rather than leaking the raw
+        // driver error to the client.
+        msg := err.Error()
+        switch {
+        case strings.Contains(msg, "users.email"):
+            w.WriteHeader(http.StatusConflict)
+            json.NewEncoder(w).Encode(map[string]string{
+                "error": "Email already in use",
+            })
+        case strings.Contains(msg, "users.nickname"):
+            w.WriteHeader(http.StatusConflict)
+            json.NewEncoder(w).Encode(map[string]string{
+                "error": "Nickname is already taken",
+            })
+        default:
+            w.WriteHeader(http.StatusInternalServerError)
+            json.NewEncoder(w).Encode(map[string]string{
+                "error": "Failed to create user",
+            })
+        }
         return
     }
 

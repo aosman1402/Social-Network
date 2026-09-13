@@ -1,15 +1,15 @@
 package handlers
 
 import (
-	"database/sql"
-	"encoding/json"
-	"net/http"
-	"strconv"
-	"time"
+    "database/sql"
+    "encoding/json"
     "log"
+    "net/http"
+    "strconv"
+    "time"
 
-	"social-network3/pkg/middleware"
-	"social-network3/pkg/models"
+    "social-network3/pkg/middleware"
+    "social-network3/pkg/models"
 )
 
 type PostHandler struct {
@@ -90,6 +90,35 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
 
     postID, _ := result.LastInsertId()
 
+    // For a 'private' post, the author picks specific viewers from their
+    // followers - stored as an explicit allowlist. Re-check each chosen id
+    // is actually an accepted follower server-side (never trust the form
+    // alone) rather than letting the author name arbitrary user ids.
+    var allowedUserIDs []int64
+    if privacyLevel == "private" {
+        for _, idStr := range r.Form["allowed_user_ids"] {
+            id, err := strconv.ParseInt(idStr, 10, 64)
+            if err != nil {
+                continue
+            }
+            var isFollower bool
+            ph.DB.QueryRow(
+                "SELECT EXISTS(SELECT 1 FROM follows WHERE follower_id = ? AND following_id = ? AND status = 'accepted')",
+                id, userID,
+            ).Scan(&isFollower)
+            if isFollower {
+                allowedUserIDs = append(allowedUserIDs, id)
+            }
+        }
+        for _, id := range allowedUserIDs {
+            ph.DB.Exec(
+                `INSERT INTO post_allowed_users (post_id, user_id, created_at) VALUES (?, ?, ?)
+                 ON CONFLICT(post_id, user_id) DO NOTHING`,
+                postID, id, time.Now(),
+            )
+        }
+    }
+
     // Get user info
     var user models.User
     ph.DB.QueryRow(
@@ -103,18 +132,19 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
 
     post := map[string]interface{}{
-        "id":            postID,
-        "user_id":       userID,
-        "content":       content,
-        "image_path":    imagePath,
-        "privacy_level": privacyLevel,
-        "group_id":      groupID,
-        "created_at":    time.Now(),
-        "user":          user,
-        "comment_count": commentCount,
-        "like_count":    likeCount,
-        "is_liked":      false,
-        "is_saved":      false,
+        "id":               postID,
+        "user_id":          userID,
+        "content":          content,
+        "image_path":       imagePath,
+        "privacy_level":    privacyLevel,
+        "group_id":         groupID,
+        "allowed_user_ids": allowedUserIDs,
+        "created_at":       time.Now(),
+        "user":             user,
+        "comment_count":    commentCount,
+        "like_count":       likeCount,
+        "is_liked":         false,
+        "is_saved":         false,
     }
 
     w.Header().Set("Content-Type", "application/json")
@@ -143,13 +173,16 @@ func (ph *PostHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
            OR (p.privacy_level = 'almost_private' AND p.user_id IN (
                SELECT following_id FROM follows WHERE follower_id = ? AND status = 'accepted'
            ))
+           OR (p.privacy_level = 'private' AND p.id IN (
+               SELECT post_id FROM post_allowed_users WHERE user_id = ?
+           ))
            OR p.user_id = ?
            OR (p.group_id IS NOT NULL AND p.group_id IN (
                SELECT group_id FROM group_members WHERE user_id = ? AND status = 'active'
            ))
         ORDER BY p.created_at DESC
         LIMIT 50
-    `, userID, userID, userID, userID, userID)
+    `, userID, userID, userID, userID, userID, userID)
 
     if err != nil {
         http.Error(w, "Failed to get posts: "+err.Error(), http.StatusInternalServerError)
@@ -176,19 +209,19 @@ func (ph *PostHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
         }
 
         posts = append(posts, map[string]interface{}{
-            "id":             post.ID,
-            "user_id":        post.UserID,
-            "content":        post.Content,
-            "image_path":     post.ImagePath,
-            "privacy_level":  post.PrivacyLevel,
-            "group_id":       post.GroupID,
-            "created_at":     post.CreatedAt,
-            "updated_at":     post.UpdatedAt,
-            "user":           user,
-            "comment_count":  commentCount,
-            "like_count":     likeCount,
-            "is_liked":       isLiked,
-            "is_saved":       isSaved,
+            "id":            post.ID,
+            "user_id":       post.UserID,
+            "content":       post.Content,
+            "image_path":    post.ImagePath,
+            "privacy_level": post.PrivacyLevel,
+            "group_id":      post.GroupID,
+            "created_at":    post.CreatedAt,
+            "updated_at":    post.UpdatedAt,
+            "user":          user,
+            "comment_count": commentCount,
+            "like_count":    likeCount,
+            "is_liked":      isLiked,
+            "is_saved":      isSaved,
         })
     }
 
@@ -392,7 +425,7 @@ func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
         }
         var likeCount int
         ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
-        
+
         // ✅ Return JSON response
         json.NewEncoder(w).Encode(map[string]interface{}{
             "message":    "Post unliked",
@@ -435,6 +468,7 @@ func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
         "like_count": likeCount,
     })
 }
+
 // SavePost - Save or unsave a post
 func (ph *PostHandler) SavePost(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)

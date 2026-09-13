@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 
-export default function FollowRequests() {
+export default function FollowRequests({ onRequestHandled }) {
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -47,10 +47,12 @@ export default function FollowRequests() {
       );
 
       if (response.ok) {
+        const request = requests.find((r) => r.follower.id === followerId);
         setRequests(requests.filter((r) => r.follower.id !== followerId));
         toast.success(`Follow request ${action}ed`);
-        // Refresh the page to update follower count
-        window.location.reload();
+        // Let the parent update follower count/list in place instead of a
+        // full page reload.
+        if (onRequestHandled) onRequestHandled(action, request?.follower);
       } else {
         const data = await response.json();
         toast.error(data.error || "Failed to process request");
