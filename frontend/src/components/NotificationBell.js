@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
+import { useAuth } from "@/context/AuthContext";
 
 function BellIcon({ size = 20 }) {
   return (
@@ -19,6 +20,7 @@ function BellIcon({ size = 20 }) {
 
 export default function NotificationBell() {
   const router = useRouter();
+  const { user } = useAuth();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -185,6 +187,11 @@ export default function NotificationBell() {
     // Navigate based on notification type
     switch (notification.type) {
       case "follow_request":
+        // related_id here is the sender (the person who wants to follow
+        // you) - the recipient needs to land on their OWN profile's
+        // Requests tab to accept/decline, not on the sender's profile.
+        router.push(`/profile/${user?.id}?tab=requests`);
+        break;
       case "follow_accepted":
       case "new_follower":
         router.push(`/profile/${notification.related_id}`);

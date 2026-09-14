@@ -4,26 +4,22 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
+import { useAuth } from "@/context/AuthContext";
 
 export default function NotificationsPage() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const checkAuth = async () => {
-      const response = await fetch("http://localhost:8081/api/check-auth", {
-        credentials: "include",
-      });
-      const data = await response.json();
-      if (!data.authenticated) {
-        router.push("/login");
-        return;
-      }
-      fetchNotifications();
-    };
-    checkAuth();
-  }, [router]);
+    if (authLoading) return;
+    if (!user) {
+      router.push("/login");
+      return;
+    }
+    fetchNotifications();
+  }, [user, authLoading, router]);
 
   const fetchNotifications = async () => {
     try {
@@ -155,6 +151,10 @@ export default function NotificationsPage() {
                   // Navigate based on type
                   switch (notification.type) {
                     case "follow_request":
+                      // related_id is the sender - land the recipient on
+                      // their OWN profile's Requests tab to act on it.
+                      router.push(`/profile/${user?.id}?tab=requests`);
+                      break;
                     case "follow_accepted":
                     case "new_follower":
                       router.push(`/profile/${notification.related_id}`);

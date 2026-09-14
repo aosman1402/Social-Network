@@ -1,15 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import FollowRequests from "@/components/FollowRequests";
 import Avatar from "@/components/Avatar";
 
+const VALID_TABS = ["posts", "followers", "following", "requests"];
+
 export default function ProfileDetailPage() {
   const params = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const userId = params.id;
+
+  // A notification (e.g. "X requested to follow you") can deep-link here
+  // with ?tab=requests so the recipient lands straight on the tab that
+  // handles it, instead of just the default Posts tab.
+  const initialTab = VALID_TABS.includes(searchParams.get("tab"))
+    ? searchParams.get("tab")
+    : "posts";
 
   const [profile, setProfile] = useState(null);
   const [userPosts, setUserPosts] = useState([]);
@@ -17,10 +27,11 @@ export default function ProfileDetailPage() {
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [error, setError] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
-  const [activeTab, setActiveTab] = useState("posts");
+  const [activeTab, setActiveTab] = useState(initialTab);
   const [followers, setFollowers] = useState([]);
   const [following, setFollowing] = useState([]);
   const [isOwnProfile, setIsOwnProfile] = useState(false);
+  const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   // ✅ Format date function
   const formatDate = (dateString, fallback = "Recently joined") => {
@@ -89,7 +100,15 @@ export default function ProfileDetailPage() {
           if (profileRes.status === 404) {
             setError("User not found");
           } else if (profileRes.status === 403) {
-            setError("This profile is private");
+            // Private account, not (yet) an accepted follower - the body
+            // still carries name/avatar/follow-status so this renders as
+            // an identity card with a follow-request button, not a dead end.
+            const blocked = await profileRes.json().catch(() => null);
+            if (blocked) {
+              setProfile(blocked);
+            } else {
+              setError("This profile is private");
+            }
           } else {
             setError("Failed to load profile");
           }
@@ -105,6 +124,26 @@ export default function ProfileDetailPage() {
         // 4. Fetch followers and following
         await fetchFollowers(userId);
         await fetchFollowing(userId);
+
+        // 5. On your own profile, get the pending-requests count up front
+        // so the "Requests" tab shows it without having to click into it
+        // first - FollowRequests itself keeps it live after that.
+        if (authData.id === parseInt(userId)) {
+          try {
+            const reqRes = await fetch(
+              "http://localhost:8081/api/user/follow-requests",
+              { credentials: "include" },
+            );
+            if (reqRes.ok) {
+              const reqData = await reqRes.json();
+              setPendingRequestsCount(
+                Array.isArray(reqData) ? reqData.length : 0,
+              );
+            }
+          } catch (err) {
+            console.error("Error fetching follow requests count:", err);
+          }
+        }
       } catch (err) {
         console.error("Error fetching profile:", err);
         setError("Network error");
@@ -314,6 +353,43 @@ export default function ProfileDetailPage() {
     );
   }
 
+  // ✅ Private account, not (yet) an accepted follower - show who it is
+  // and a way to request access, instead of a dead-end error page.
+  if (profile?.private) {
+    return (
+      <div className='max-w-md mx-auto py-12 px-4 text-center'>
+        <div className='flex justify-center mb-4'>
+          <Avatar user={profile} size='2xl' />
+        </div>
+        <h2 className='text-2xl font-bold'>
+          {profile.first_name} {profile.last_name}
+        </h2>
+        {profile.nickname && (
+          <p className='text-gray-500'>@{profile.nickname}</p>
+        )}
+        <p className='text-gray-600 mt-3'>
+          🔒 This profile is private. Follow to see their posts and info.
+        </p>
+        <div className='mt-4 flex justify-center gap-2'>
+          <button
+            onClick={handleFollowToggle}
+            className={`px-4 py-2 rounded-lg font-medium transition ${
+              profile.is_pending
+                ? "bg-yellow-100 text-yellow-800 hover:bg-red-100 hover:text-red-700"
+                : "bg-blue-500 text-white hover:bg-blue-600"
+            }`}>
+            {profile.is_pending ? "Pending · Cancel" : "Follow Request"}
+          </button>
+          <button
+            onClick={() => router.push("/")}
+            className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
+            Go Home
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ✅ Not found state
   if (!profile) {
     return (
@@ -500,7 +576,7 @@ export default function ProfileDetailPage() {
                   ? "text-blue-600 border-b-2 border-blue-600"
                   : "text-gray-500 hover:text-gray-700"
               }`}>
-              Requests
+              Requests ({pendingRequestsCount})
             </button>
           )}
         </div>
@@ -635,7 +711,10 @@ export default function ProfileDetailPage() {
 
           {/* Requests Tab (own profile only) */}
           {isOwnProfile && activeTab === "requests" && (
-            <FollowRequests onRequestHandled={handleFollowRequestHandled} />
+            <FollowRequests
+              onRequestHandled={handleFollowRequestHandled}
+              onCountChange={setPendingRequestsCount}
+            />
           )}
         </div>
       </div>

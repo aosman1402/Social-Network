@@ -145,8 +145,10 @@ func (uh *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
     user.IsPublic = isPublic
 
     // Private accounts are only visible to themselves and their accepted
-    // followers - everyone else gets a 403, matching the frontend's
-    // existing (previously unreachable) "This profile is private" handling.
+    // followers - everyone else gets a 403. The body still carries enough
+    // (name, avatar, follow status) for the frontend to render an identity
+    // card with a follow-request button, rather than a bare error with
+    // nothing to do on it.
     if !isPublic && currentUserID != userID {
         accepted, err := uh.hasAcceptedFollow(currentUserID, userID)
         if err != nil {
@@ -154,7 +156,29 @@ func (uh *UserHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
             return
         }
         if !accepted {
-            http.Error(w, "This profile is private", http.StatusForbidden)
+            var isPending bool
+            if currentUserID != 0 {
+                var status string
+                if err := uh.DB.QueryRow(
+                    "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+                    currentUserID, userID,
+                ).Scan(&status); err == nil {
+                    isPending = status == "pending"
+                }
+            }
+            w.WriteHeader(http.StatusForbidden)
+            json.NewEncoder(w).Encode(map[string]interface{}{
+                "error":        "This profile is private",
+                "private":      true,
+                "id":           user.ID,
+                "first_name":   user.FirstName,
+                "last_name":    user.LastName,
+                "avatar_path":  user.AvatarPath,
+                "nickname":     user.Nickname,
+                "is_public":    false,
+                "is_following": false,
+                "is_pending":   isPending,
+            })
             return
         }
     }

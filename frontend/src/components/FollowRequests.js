@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 
-export default function FollowRequests({ onRequestHandled }) {
+export default function FollowRequests({ onRequestHandled, onCountChange }) {
   const router = useRouter();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -12,6 +12,13 @@ export default function FollowRequests({ onRequestHandled }) {
   useEffect(() => {
     fetchRequests();
   }, []);
+
+  // Report the current pending count up to the parent whenever it changes
+  // (initial load, and after each accept/decline) so a tab label showing
+  // "Requests (N)" elsewhere stays in sync without a page reload.
+  useEffect(() => {
+    if (onCountChange) onCountChange(requests.length);
+  }, [requests, onCountChange]);
 
   const fetchRequests = async () => {
     try {
