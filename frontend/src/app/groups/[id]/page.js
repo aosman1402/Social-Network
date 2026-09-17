@@ -5,24 +5,19 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 
 export default function GroupDetailPage() {
-  // ✅ params.id comes from the [id] folder name
   const params = useParams();
   const router = useRouter();
-  const groupId = params.id; // This is the value from the URL
+  const groupId = params.id;
 
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [members, setMembers] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
-  const [showInviteModal, setShowInviteModal] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [inviting, setInviting] = useState(false);
 
   useEffect(() => {
     const fetchGroup = async () => {
       try {
-        // Check authentication
         const authRes = await fetch("http://localhost:8081/api/check-auth", {
           credentials: "include",
         });
@@ -32,20 +27,14 @@ export default function GroupDetailPage() {
           return;
         }
 
-        // ✅ Fetch group by ID
         const response = await fetch(
           `http://localhost:8081/api/group/detail?id=${groupId}`,
-          {
-            credentials: "include",
-          },
+          { credentials: "include" },
         );
 
         if (!response.ok) {
-          if (response.status === 404) {
-            setError("Group not found");
-          } else {
-            setError("Failed to load group");
-          }
+          if (response.status === 404) setError("Group not found");
+          else setError("Failed to load group");
           return;
         }
 
@@ -53,41 +42,35 @@ export default function GroupDetailPage() {
         setGroup(data);
         setMembers(data.members || []);
         setPendingRequests(data.pending_requests || []);
-      } catch (error) {
-        console.error("Error fetching group:", error);
+      } catch (err) {
+        console.error("Error fetching group:", err);
         setError("Network error");
       } finally {
         setLoading(false);
       }
     };
 
-    if (groupId) {
-      fetchGroup();
-    }
+    if (groupId) fetchGroup();
   }, [groupId, router]);
 
   const handleJoinGroup = async () => {
     try {
       const response = await fetch("http://localhost:8081/api/group/join", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ group_id: parseInt(groupId) }),
       });
-
       const data = await response.json();
 
       if (response.ok) {
         toast.success(data.message || "Request sent successfully");
-        // Refresh group data
         window.location.reload();
       } else {
         toast.error(data.error || "Failed to join group");
       }
-    } catch (error) {
-      console.error("Error joining group:", error);
+    } catch (err) {
+      console.error("Error joining group:", err);
       toast.error("Failed to join group");
     }
   };
@@ -98,9 +81,7 @@ export default function GroupDetailPage() {
     try {
       const response = await fetch("http://localhost:8081/api/group/leave", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ group_id: parseInt(groupId) }),
       });
@@ -112,66 +93,9 @@ export default function GroupDetailPage() {
         const data = await response.json();
         toast.error(data.error || "Failed to leave group");
       }
-    } catch (error) {
-      console.error("Error leaving group:", error);
+    } catch (err) {
+      console.error("Error leaving group:", err);
       toast.error("Failed to leave group");
-    }
-  };
-
-  const handleInvite = async (e) => {
-    e.preventDefault();
-    if (!inviteEmail.trim()) {
-      toast.error("Please enter an email");
-      return;
-    }
-
-    setInviting(true);
-    try {
-      // Search for user by email
-      const userRes = await fetch(
-        `http://localhost:8081/api/user/search?email=${inviteEmail}`,
-        {
-          credentials: "include",
-        },
-      );
-
-      if (!userRes.ok) {
-        toast.error("User not found");
-        return;
-      }
-
-      const userData = await userRes.json();
-      if (!userData.id) {
-        toast.error("User not found");
-        return;
-      }
-
-      const response = await fetch("http://localhost:8081/api/group/invite", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          user_id: userData.id,
-          group_id: parseInt(groupId),
-        }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success("Invitation sent successfully");
-        setInviteEmail("");
-        setShowInviteModal(false);
-      } else {
-        toast.error(data.error || "Failed to send invitation");
-      }
-    } catch (error) {
-      console.error("Error sending invitation:", error);
-      toast.error("Failed to send invitation");
-    } finally {
-      setInviting(false);
     }
   };
 
@@ -179,14 +103,9 @@ export default function GroupDetailPage() {
     try {
       const response = await fetch("http://localhost:8081/api/group/request", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: { "Content-Type": "application/json" },
         credentials: "include",
-        body: JSON.stringify({
-          request_id: requestId,
-          action: action,
-        }),
+        body: JSON.stringify({ request_id: requestId, action }),
       });
 
       if (response.ok) {
@@ -196,28 +115,28 @@ export default function GroupDetailPage() {
         const data = await response.json();
         toast.error(data.error || "Failed to process request");
       }
-    } catch (error) {
-      console.error("Error processing request:", error);
+    } catch (err) {
+      console.error("Error processing request:", err);
       toast.error("Failed to process request");
     }
   };
 
   if (loading) {
     return (
-      <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+      <div className='group-loading'>
+        <div className='group-spinner' />
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className='max-w-4xl mx-auto py-12 px-4 text-center'>
-        <h2 className='text-2xl font-bold text-red-600'>Error</h2>
-        <p className='text-gray-600 mt-2'>{error}</p>
+      <div className='group-error'>
+        <h2 className='group-error-title'>Error</h2>
+        <p className='group-error-msg'>{error}</p>
         <button
           onClick={() => router.push("/groups")}
-          className='mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600'>
+          className='group-back-btn'>
           Back to Groups
         </button>
       </div>
@@ -226,11 +145,11 @@ export default function GroupDetailPage() {
 
   if (!group) {
     return (
-      <div className='max-w-4xl mx-auto py-12 px-4 text-center'>
-        <h2 className='text-2xl font-bold text-gray-600'>Group not found</h2>
+      <div className='group-error'>
+        <h2 className='group-error-title'>Group not found</h2>
         <button
           onClick={() => router.push("/groups")}
-          className='mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600'>
+          className='group-back-btn'>
           Back to Groups
         </button>
       </div>
@@ -240,95 +159,83 @@ export default function GroupDetailPage() {
   const isMember = group.is_member || false;
 
   return (
-    <div className='max-w-4xl mx-auto py-4 px-4'>
-      {/* Back button */}
+    <div className='group-page'>
       <button
         onClick={() => router.push("/groups")}
-        className='text-blue-500 hover:text-blue-700 mb-4 flex items-center'>
+        className='group-back-link'>
         ← Back to Groups
       </button>
 
-      {/* Group Header */}
-      <div className='bg-white rounded-lg shadow'>
-        <div className='p-6 border-b'>
-          <div className='flex items-start justify-between'>
-            <div>
-              <h1 className='text-2xl font-bold'>{group.title}</h1>
-              <p className='text-gray-600 mt-1'>
-                {group.description || "No description"}
-              </p>
-              <div className='flex items-center space-x-4 mt-2'>
-                <span className='text-sm text-gray-500'>
-                  👥 {group.member_count || 0} members
-                </span>
-                <span className='text-sm text-gray-500'>
-                  Created {new Date(group.created_at).toLocaleDateString()}
-                </span>
-              </div>
+      <div className='group-card'>
+        {/* Header */}
+        <div className='group-header'>
+          <div className='group-header-left'>
+            <h1 className='group-title'>{group.title}</h1>
+            <p className='group-description'>
+              {group.description || "No description"}
+            </p>
+            <div className='group-meta'>
+              <span>👥 {group.member_count || 0} members</span>
+              <span>
+                Created {new Date(group.created_at).toLocaleDateString()}
+              </span>
             </div>
-            <div className='flex space-x-2'>
-              {!isMember && !group.has_pending_request && !group.is_invited && (
-                <button
-                  onClick={handleJoinGroup}
-                  className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition'>
-                  Join Group
-                </button>
-              )}
-              {group.has_pending_request && (
-                <span className='px-4 py-2 bg-yellow-100 text-yellow-700 rounded-lg'>
-                  Request Pending
-                </span>
-              )}
-              {group.is_invited && (
-                <span className='px-4 py-2 bg-green-100 text-green-700 rounded-lg'>
-                  Invited
-                </span>
-              )}
-              {isMember && (
-                <>
-                  <button
-                    onClick={() => setShowInviteModal(true)}
-                    className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
-                    + Invite
-                  </button>
-                  <button
-                    onClick={handleLeaveGroup}
-                    className='px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600 transition'>
-                    Leave
-                  </button>
-                </>
-              )}
-            </div>
+          </div>
+
+          <div className='group-header-actions'>
+            {!isMember && !group.has_pending_request && !group.is_invited && (
+              <button onClick={handleJoinGroup} className='group-join-btn'>
+                Join Group
+              </button>
+            )}
+            {group.has_pending_request && (
+              <span className='group-status group-status--pending'>
+                Request Pending
+              </span>
+            )}
+            {group.is_invited && (
+              <span className='group-status group-status--invited'>
+                Invited
+              </span>
+            )}
+            {isMember && (
+              <button onClick={handleLeaveGroup} className='group-leave-btn'>
+                Leave
+              </button>
+            )}
           </div>
         </div>
 
-        {/* Pending Requests (only for creator) */}
-        {group.creator_id === parseInt(localStorage.getItem("userId") || "0") &&
+        {/* Pending join requests (creator only) */}
+        {group.creator_id ===
+          parseInt(
+            typeof window !== "undefined"
+              ? localStorage.getItem("userId") || "0"
+              : "0",
+          ) &&
           pendingRequests.length > 0 && (
-            <div className='p-4 border-b'>
-              <h3 className='font-semibold mb-2'>Pending Join Requests</h3>
-              <div className='space-y-2'>
+            <div className='group-section'>
+              <h3 className='group-section-title'>Pending Join Requests</h3>
+              <div className='group-section-body'>
                 {pendingRequests.map((req) => (
-                  <div
-                    key={req.id}
-                    className='flex items-center justify-between bg-gray-50 p-2 rounded'>
+                  <div key={req.id} className='group-member-row'>
                     <div>
-                      <p className='font-medium'>
+                      <p className='group-member-name'>
                         {req.user.first_name} {req.user.last_name}
                       </p>
-                      <p className='text-sm text-gray-500'>
+                      <p className='group-member-nick'>
                         @{req.user.nickname || req.user.first_name}
                       </p>
                     </div>
-                    <div className='flex space-x-2'>
+                    <div className='group-member-actions'>
                       <button
                         onClick={() => handleRequestAction(req.id, "accept")}
-                        className='px-3 py-1 bg-green-500 text-white rounded hover:bg-green-600 text-sm'>
+                        className='group-accept-btn'>
                         Accept
                       </button>
                       <button
                         onClick={() => handleRequestAction(req.id, "decline")}
-                        className='px-3 py-1 bg-red-500 text-white rounded hover:bg-red-600 text-sm'>
+                        className='group-decline-btn'>
                         Decline
                       </button>
                     </div>
@@ -339,78 +246,50 @@ export default function GroupDetailPage() {
           )}
 
         {/* Members */}
-        <div className='p-4'>
-          <h3 className='font-semibold mb-2'>Members ({members.length})</h3>
-          <div className='space-y-2'>
+        <div className='group-section'>
+          <h3 className='group-section-title'>Members ({members.length})</h3>
+          <div className='group-section-body'>
             {members.length === 0 ? (
-              <p className='text-gray-400'>No members yet</p>
+              <p className='group-empty'>No members yet</p>
             ) : (
               members.map((member) => (
-                <div
-                  key={member.user.id}
-                  className='flex items-center justify-between bg-gray-50 p-2 rounded'>
+                <div key={member.user.id} className='group-member-row'>
                   <div
-                    className='flex items-center space-x-3 cursor-pointer'
+                    className='group-member-info'
                     onClick={() => router.push(`/profile/${member.user.id}`)}>
-                    <div className='w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold'>
+                    <div className='group-avatar'>
                       {member.user.first_name?.[0]}
                       {member.user.last_name?.[0]}
                     </div>
                     <div>
-                      <p className='font-medium'>
+                      <p className='group-member-name'>
                         {member.user.first_name} {member.user.last_name}
                       </p>
                       {member.user.nickname && (
-                        <p className='text-sm text-gray-500'>
+                        <p className='group-member-nick'>
                           @{member.user.nickname}
                         </p>
                       )}
                     </div>
                   </div>
-                  {member.user.id === group.creator_id && (
-                    <span className='text-xs bg-yellow-100 text-yellow-700 px-2 py-1 rounded'>
-                      Creator
-                    </span>
-                  )}
+                  <div className='group-member-badges'>
+                    {member.user.id === group.creator_id && (
+                      <span className='group-badge group-badge--creator'>
+                        Creator
+                      </span>
+                    )}
+                    {member.status === "invited" && (
+                      <span className='group-badge group-badge--invited'>
+                        Invited
+                      </span>
+                    )}
+                  </div>
                 </div>
               ))
             )}
           </div>
         </div>
       </div>
-
-      {/* Invite Modal */}
-      {showInviteModal && (
-        <div className='fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4'>
-          <div className='bg-white rounded-lg max-w-md w-full p-6'>
-            <h2 className='text-xl font-bold mb-4'>Invite to Group</h2>
-            <form onSubmit={handleInvite} className='space-y-4'>
-              <input
-                type='email'
-                placeholder="Enter user's email"
-                value={inviteEmail}
-                onChange={(e) => setInviteEmail(e.target.value)}
-                className='w-full px-3 py-2 border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
-                required
-              />
-              <div className='flex justify-end space-x-2'>
-                <button
-                  type='button'
-                  onClick={() => setShowInviteModal(false)}
-                  className='px-4 py-2 text-gray-600 hover:bg-gray-100 rounded-lg'>
-                  Cancel
-                </button>
-                <button
-                  type='submit'
-                  disabled={inviting}
-                  className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50'>
-                  {inviting ? "Sending..." : "Send Invite"}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
