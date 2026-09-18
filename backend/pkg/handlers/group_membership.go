@@ -6,7 +6,7 @@ import (
     "net/http"
     "time"
 
-    "social-network3/pkg/middleware"
+    "social-network/pkg/middleware"
 )
 
 type GroupInviteRequest struct {

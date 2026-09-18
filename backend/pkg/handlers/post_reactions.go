@@ -6,7 +6,7 @@ import (
     "strconv"
     "time"
 
-    "social-network3/pkg/middleware"
+    "social-network/pkg/middleware"
 )
 
 // LikePost - Like or unlike a post

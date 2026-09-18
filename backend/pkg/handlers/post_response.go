@@ -3,7 +3,7 @@ package handlers
 import (
     "database/sql"
 
-    "social-network3/pkg/models"
+    "social-network/pkg/models"
 )
 
 // postRowColumns is the exact column list every "list of posts" query

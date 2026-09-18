@@ -5,7 +5,7 @@ import (
     "log"
     "net/http"
 
-    "social-network3/pkg/middleware"
+    "social-network/pkg/middleware"
 )
 
 // GetNotifications - Get user notifications

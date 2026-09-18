@@ -7,8 +7,8 @@ import (
     "strconv"
     "time"
 
-    "social-network3/pkg/middleware"
-    "social-network3/pkg/models"
+    "social-network/pkg/middleware"
+    "social-network/pkg/models"
 )
 
 // CreateEvent - Create a group event

@@ -10,7 +10,7 @@ import (
     "net/http/httptest"
     "testing"
 
-    "social-network3/pkg/middleware"
+    "social-network/pkg/middleware"
 )
 
 // withUserID attaches userID to the request context the same way

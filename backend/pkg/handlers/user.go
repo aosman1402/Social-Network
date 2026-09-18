@@ -8,9 +8,9 @@ import (
     "strconv"
     "time"
 
-    "social-network3/pkg/middleware"
-    "social-network3/pkg/models"
-    "social-network3/pkg/websocket"
+    "social-network/pkg/middleware"
+    "social-network/pkg/models"
+    "social-network/pkg/websocket"
 )
 
 type UserHandler struct {

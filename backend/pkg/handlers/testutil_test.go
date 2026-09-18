@@ -5,7 +5,7 @@ import (
     "path/filepath"
     "testing"
 
-    "social-network3/pkg/db/sqlite"
+    "social-network/pkg/db/sqlite"
 )
 
 // newTestDB spins up a fresh, throwaway SQLite database with every

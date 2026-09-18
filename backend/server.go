@@ -7,10 +7,10 @@ import (
     "path/filepath"
     "time"
 
-    "social-network3/pkg/db/sqlite"
-    "social-network3/pkg/handlers"
-    "social-network3/pkg/middleware"
-    "social-network3/pkg/websocket"
+    "social-network/pkg/db/sqlite"
+    "social-network/pkg/handlers"
+    "social-network/pkg/middleware"
+    "social-network/pkg/websocket"
 )
 
 func main() {

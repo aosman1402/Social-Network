@@ -6,9 +6,9 @@ import (
     "net/http"
     "strconv"
 
-    "social-network3/pkg/middleware"
-    "social-network3/pkg/models"
-    "social-network3/pkg/websocket"
+    "social-network/pkg/middleware"
+    "social-network/pkg/models"
+    "social-network/pkg/websocket"
 )
 
 // GetChats - Get all chats for a user

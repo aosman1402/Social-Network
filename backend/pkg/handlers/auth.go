@@ -8,7 +8,7 @@ import (
     "strings"
     "time"
 
-    "social-network3/pkg/middleware"
+    "social-network/pkg/middleware"
 
     "github.com/google/uuid"
     "golang.org/x/crypto/bcrypt"
