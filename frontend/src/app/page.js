@@ -1,18 +1,20 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { useRouter } from "next/navigation";
 import PostForm from "@/components/PostForm";
 import PostCard from "@/components/PostCard";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function HomePage() {
-  const router = useRouter();
+  const { user, loading } = useRequireAuth();
   const [posts, setPosts] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [user, setUser] = useState(null);
 
   const fetchPosts = async () => {
     try {
+      // Goes through the Next.js rewrite proxy (next.config.js) rather
+      // than the backend directly - see the note in next.config.js on why
+      // this one call is different from the rest of the app.
       const response = await fetch("/api/posts");
       if (!response.ok) {
         console.error("Failed to fetch posts:", response.status);
@@ -29,29 +31,8 @@ export default function HomePage() {
   };
 
   useEffect(() => {
-    const checkAuth = async () => {
-      try {
-        const response = await fetch("http://localhost:8081/api/check-auth", {
-          credentials: "include",
-        });
-
-        const data = await response.json();
-        if (data.authenticated) {
-          setUser(data);
-          await fetchPosts();
-        } else {
-          router.push("/login");
-        }
-      } catch (error) {
-        console.error("Auth check error:", error);
-        router.push("/login");
-      } finally {
-        setLoading(false);
-      }
-    };
-
-    checkAuth();
-  }, [router]);
+    if (user) fetchPosts();
+  }, [user]);
 
   const handlePostCreated = () => {
     fetchPosts();
@@ -64,7 +45,7 @@ export default function HomePage() {
   if (loading) {
     return (
       <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+        <LoadingSpinner size='large' />
       </div>
     );
   }

@@ -2,33 +2,21 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { useAuth } from "@/context/AuthContext";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 export default function ProfileRedirect() {
   const router = useRouter();
+  const { user, loading } = useAuth();
 
   useEffect(() => {
-    const redirectToMyProfile = async () => {
-      try {
-        const response = await fetch("http://localhost:8081/api/check-auth", {
-          credentials: "include",
-        });
-        const data = await response.json();
-        if (data.authenticated) {
-          router.replace(`/profile/${data.id}`);
-        } else {
-          router.replace("/login");
-        }
-      } catch {
-        router.replace("/login");
-      }
-    };
-
-    redirectToMyProfile();
-  }, [router]);
+    if (loading) return;
+    router.replace(user ? `/profile/${user.id}` : "/login");
+  }, [user, loading, router]);
 
   return (
     <div className='flex justify-center items-center h-64'>
-      <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+      <LoadingSpinner size='large' />
     </div>
   );
 }

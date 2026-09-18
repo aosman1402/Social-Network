@@ -97,10 +97,10 @@ func deleteUploadedImage(publicPath string) {
 func imageUploadErrorResponse(w http.ResponseWriter, err error) {
     switch err {
     case ErrImageTooLarge:
-        http.Error(w, "Image size must be less than 5MB", http.StatusBadRequest)
+        writeJSONError(w, http.StatusBadRequest, "Image size must be less than 5MB")
     case ErrInvalidImageType:
-        http.Error(w, "Invalid image type. Only JPEG, PNG, and GIF are allowed", http.StatusBadRequest)
+        writeJSONError(w, http.StatusBadRequest, "Invalid image type. Only JPEG, PNG, and GIF are allowed")
     default:
-        http.Error(w, "Failed to save image", http.StatusInternalServerError)
+        writeJSONError(w, http.StatusInternalServerError, "Failed to save image")
     }
 }

@@ -3,6 +3,7 @@ package middleware
 import (
     "context"
     "database/sql"
+    "encoding/json"
     "log"
     "net/http"
     "time"
@@ -18,6 +19,18 @@ const UserIDKey contextKey = "userID"
 // are simply not checked, rather than being penalized for its absence.
 const DeviceFingerprintHeader = "X-Device-Fingerprint"
 
+// writeUnauthorized writes a JSON error body, not the stdlib http.Error's
+// plain text - the frontend's apiFetch always calls response.json() on
+// every response, and a plain-text body fails that parse, silently
+// becoming `data: null` and crashing any caller that does
+// `data.error || "fallback"` on it. This middleware wraps nearly every
+// authenticated endpoint, so it's the most-hit instance of that bug.
+func writeUnauthorized(w http.ResponseWriter, message string) {
+    w.Header().Set("Content-Type", "application/json")
+    w.WriteHeader(http.StatusUnauthorized)
+    json.NewEncoder(w).Encode(map[string]string{"error": message})
+}
+
 type AuthMiddleware struct {
     DB *sql.DB
 }
@@ -26,7 +39,7 @@ func (am *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
         cookie, err := r.Cookie("session_token")
         if err != nil {
-            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            writeUnauthorized(w, "Unauthorized")
             return
         }
 
@@ -39,14 +52,14 @@ func (am *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
         ).Scan(&userID, &expiresAt, &storedIP, &storedFingerprint)
 
         if err != nil {
-            http.Error(w, "Unauthorized", http.StatusUnauthorized)
+            writeUnauthorized(w, "Unauthorized")
             return
         }
 
         if time.Now().After(expiresAt) {
             // Delete expired session
             am.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
-            http.Error(w, "Session expired", http.StatusUnauthorized)
+            writeUnauthorized(w, "Session expired")
             return
         }
 
@@ -57,7 +70,7 @@ func (am *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
             storedFingerprint.Valid && storedFingerprint.String != "" &&
             fp != storedFingerprint.String {
             am.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
-            http.Error(w, "Session invalidated", http.StatusUnauthorized)
+            writeUnauthorized(w, "Session invalidated")
             return
         }
 

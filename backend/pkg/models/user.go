@@ -21,10 +21,11 @@ type User struct {
 
 type UserProfile struct {
     User
-    FollowersCount int `json:"followers_count"`
-    FollowingCount int `json:"following_count"`
+    FollowersCount int  `json:"followers_count"`
+    FollowingCount int  `json:"following_count"`
     IsFollowing    bool `json:"is_following"`
     IsFollowedBy   bool `json:"is_followed_by"`
+    PostsCount     int  `json:"posts_count"`
 }
 
 type Session struct {

@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 export default function FollowRequests({ onRequestHandled, onCountChange }) {
   const router = useRouter();
@@ -22,14 +24,8 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
 
   const fetchRequests = async () => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/user/follow-requests",
-        {
-          credentials: "include",
-        },
-      );
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await apiFetch("/user/follow-requests");
+      if (ok) {
         setRequests(data);
       }
     } catch (error) {
@@ -41,19 +37,12 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
 
   const handleRequest = async (followerId, action) => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/user/follow-request",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({ follower_id: followerId, action }),
-        },
-      );
+      const { ok, data } = await apiFetch("/user/follow-request", {
+        method: "POST",
+        json: { follower_id: followerId, action },
+      });
 
-      if (response.ok) {
+      if (ok) {
         const request = requests.find((r) => r.follower.id === followerId);
         setRequests(requests.filter((r) => r.follower.id !== followerId));
         toast.success(`Follow request ${action}ed`);
@@ -61,7 +50,6 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
         // full page reload.
         if (onRequestHandled) onRequestHandled(action, request?.follower);
       } else {
-        const data = await response.json();
         toast.error(data.error || "Failed to process request");
       }
     } catch (error) {
@@ -73,7 +61,7 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
   if (loading) {
     return (
       <div className='text-center py-4'>
-        <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto'></div>
+        <LoadingSpinner size='medium' />
       </div>
     );
   }

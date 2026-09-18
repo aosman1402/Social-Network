@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
 import { useAuth } from "@/context/AuthContext";
+import { apiFetch } from "@/lib/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
 
 export default function NotificationsPage() {
   const router = useRouter();
@@ -23,11 +25,8 @@ export default function NotificationsPage() {
 
   const fetchNotifications = async () => {
     try {
-      const response = await fetch("http://localhost:8081/api/notifications", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await apiFetch("/notifications");
+      if (ok) {
         setNotifications(data);
       }
     } catch (error) {
@@ -39,18 +38,11 @@ export default function NotificationsPage() {
 
   const markAsRead = async (id) => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/notifications/read",
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({ notification_id: id }),
-        },
-      );
-      if (response.ok) {
+      const { ok } = await apiFetch("/notifications/read", {
+        method: "PUT",
+        json: { notification_id: id },
+      });
+      if (ok) {
         setNotifications((prev) =>
           prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
         );
@@ -62,14 +54,10 @@ export default function NotificationsPage() {
 
   const markAllAsRead = async () => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/notifications/read-all",
-        {
-          method: "PUT",
-          credentials: "include",
-        },
-      );
-      if (response.ok) {
+      const { ok } = await apiFetch("/notifications/read-all", {
+        method: "PUT",
+      });
+      if (ok) {
         setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
         toast.success("All notifications marked as read");
       }
@@ -105,7 +93,7 @@ export default function NotificationsPage() {
   if (loading) {
     return (
       <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+        <LoadingSpinner size='large' />
       </div>
     );
   }

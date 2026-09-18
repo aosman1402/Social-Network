@@ -122,7 +122,11 @@ func (c *Client) ReadPump(db *sql.DB) {
 
             // Handle private or group chat
             if chatData.RecipientID != 0 {
-                go handlePrivateMessage(db, c.UserID, chatData.RecipientID, chatData.Content, c.Hub)
+                go func() {
+                    if _, err := SendPrivateMessage(db, c.Hub, c.UserID, chatData.RecipientID, chatData.Content, true); err != nil {
+                        log.Printf("Failed to send private message: %v", err)
+                    }
+                }()
             } else if chatData.GroupID != 0 {
                 go handleGroupMessage(db, c.UserID, chatData.GroupID, chatData.Content, c.Hub)
             }
@@ -196,82 +200,6 @@ func (c *Client) ReadPump(db *sql.DB) {
             c.Send <- data
         }
     }
-}
-
-func handlePrivateMessage(db *sql.DB, senderID, recipientID int64, content string, hub *Hub) {
-    // Check if users can chat
-    var count int
-    db.QueryRow(
-        `SELECT COUNT(*) FROM follows 
-         WHERE (follower_id = ? AND following_id = ? AND status = 'accepted')
-         OR (follower_id = ? AND following_id = ? AND status = 'accepted')`,
-        senderID, recipientID, recipientID, senderID,
-    ).Scan(&count)
-
-    var isPublic bool
-    db.QueryRow("SELECT is_public FROM users WHERE id = ?", recipientID).Scan(&isPublic)
-
-    if count == 0 && !isPublic {
-        return
-    }
-
-    // Save message
-    result, err := db.Exec(
-        `INSERT INTO messages (sender_id, recipient_id, content, is_group_message, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-        senderID, recipientID, content, false, time.Now(),
-    )
-    if err != nil {
-        log.Printf("Failed to save message: %v", err)
-        return
-    }
-
-    messageID, _ := result.LastInsertId()
-
-    // Get sender info
-    var sender struct {
-        ID        int64  `json:"id"`
-        Email     string `json:"email"`
-        FirstName string `json:"first_name"`
-        LastName  string `json:"last_name"`
-        Nickname  string `json:"nickname"`
-        Avatar    string `json:"avatar_path"`
-    }
-    db.QueryRow(
-        `SELECT id, email, first_name, last_name, nickname, avatar_path 
-         FROM users WHERE id = ?`,
-        senderID,
-    ).Scan(&sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.Avatar)
-
-    // Create message object
-    msg := map[string]interface{}{
-        "id":           messageID,
-        "sender_id":    senderID,
-        "recipient_id": recipientID,
-        "content":      content,
-        "created_at":   time.Now(),
-        "sender":       sender,
-    }
-    data, _ := json.Marshal(msg)
-
-    wsMsg := map[string]interface{}{
-        "type":    "chat",
-        "data":    json.RawMessage(data),
-        "room_id": "user_" + strconv.FormatInt(recipientID, 10),
-    }
-    msgBytes, _ := json.Marshal(wsMsg)
-
-    // Send to recipient if online
-    hub.BroadcastToRoom("user_"+strconv.FormatInt(recipientID, 10), msgBytes)
-
-    // Send acknowledgment to sender
-    ackMsg := map[string]interface{}{
-        "type":    "ack",
-        "data":    json.RawMessage(`{"message":"sent","message_id":`+strconv.FormatInt(messageID, 10)+`}`),
-        "room_id": "user_" + strconv.FormatInt(senderID, 10),
-    }
-    ackBytes, _ := json.Marshal(ackMsg)
-    hub.BroadcastToRoom("user_"+strconv.FormatInt(senderID, 10), ackBytes)
 }
 
 func handleGroupMessage(db *sql.DB, senderID, groupID int64, content string, hub *Hub) {

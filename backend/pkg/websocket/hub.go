@@ -42,20 +42,7 @@ func (h *Hub) Run() {
 
         case client := <-h.Unregister:
             h.mutex.Lock()
-            if _, ok := h.Clients[client]; ok {
-                delete(h.Clients, client)
-                close(client.Send)
-                
-                // Remove from rooms
-                if client.RoomID != "" {
-                    if roomClients, ok := h.Rooms[client.RoomID]; ok {
-                        delete(roomClients, client)
-                        if len(roomClients) == 0 {
-                            delete(h.Rooms, client.RoomID)
-                        }
-                    }
-                }
-            }
+            h.removeClient(client)
             h.mutex.Unlock()
 
         case message := <-h.Broadcast:
@@ -69,11 +56,34 @@ func (h *Hub) Run() {
                 select {
                 case client.Send <- message:
                 default:
-                    close(client.Send)
-                    delete(h.Clients, client)
+                    h.removeClient(client)
                 }
             }
             h.mutex.Unlock()
+        }
+    }
+}
+
+// removeClient closes the client's Send channel and removes it from both
+// h.Clients and its room (if any). The caller must hold h.mutex (Lock, not
+// RLock - this mutates the maps). Safe to call more than once for the same
+// client - a no-op after the first call, which also guards against a
+// double-close panic if a full send buffer is hit from two different call
+// sites (Run's Broadcast case and a concurrent BroadcastToRoom) in quick
+// succession.
+func (h *Hub) removeClient(client *Client) {
+    if _, ok := h.Clients[client]; !ok {
+        return
+    }
+    delete(h.Clients, client)
+    close(client.Send)
+
+    if client.RoomID != "" {
+        if roomClients, ok := h.Rooms[client.RoomID]; ok {
+            delete(roomClients, client)
+            if len(roomClients) == 0 {
+                delete(h.Rooms, client.RoomID)
+            }
         }
     }
 }
@@ -82,12 +92,14 @@ func (h *Hub) BroadcastToRoom(roomID string, message []byte) {
     // Lock, not RLock - see the comment in Run()'s Broadcast case.
     h.mutex.Lock()
     if clients, ok := h.Rooms[roomID]; ok {
+        // removeClient mutates h.Rooms[roomID] (== clients) mid-iteration,
+        // which Go allows for maps as long as we only delete the current
+        // key - never add - during range.
         for client := range clients {
             select {
             case client.Send <- message:
             default:
-                close(client.Send)
-                delete(h.Clients, client)
+                h.removeClient(client)
             }
         }
     }

@@ -1,223 +1,311 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function GroupsPage() {
   const router = useRouter();
-  const [groups, setGroups] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [showCreateForm, setShowCreateForm] = useState(false);
-  const [newGroup, setNewGroup] = useState({ title: "", description: "" });
+  const { user } = useRequireAuth();
+
+  // ---- Create-group form state ------------------------------------------
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
 
-  useEffect(() => {
-    fetchGroups();
-  }, []);
+  // ---- Invite state -----------------------------------------------------
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [pendingInvites, setPendingInvites] = useState([]); // [{id, email, first_name, last_name}]
+  const [lookingUp, setLookingUp] = useState(false);
+  const inviteRef = useRef(null);
+
+  // ---- Groups list ------------------------------------------------------
+  const [groups, setGroups] = useState([]);
+  const [loadingGroups, setLoadingGroups] = useState(true);
 
   const fetchGroups = async () => {
+    const { ok, data } = await apiFetch("/groups");
+    setGroups(ok && Array.isArray(data) ? data : []);
+  };
+
+  // Load groups once the shared auth check has resolved a signed-in user.
+  useEffect(() => {
+    if (!user) return;
+    fetchGroups().finally(() => setLoadingGroups(false));
+  }, [user]);
+
+  // Close invite popover on outside click
+  useEffect(() => {
+    const onClick = (e) => {
+      if (inviteRef.current && !inviteRef.current.contains(e.target)) {
+        setInviteOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onClick);
+    return () => document.removeEventListener("mousedown", onClick);
+  }, []);
+
+  // ---- Add an email to the pending list (looks up the user first) ------
+  const handleLookupEmail = async (e) => {
+    e.preventDefault();
+    const email = inviteEmail.trim();
+    if (!email) return;
+
+    // Avoid duplicates in the pending list
+    if (pendingInvites.some((p) => p.email === email)) {
+      toast.error("That email is already on the list");
+      return;
+    }
+
+    setLookingUp(true);
     try {
-      const authRes = await fetch("http://localhost:8081/api/check-auth", {
-        credentials: "include",
-      });
-      const authData = await authRes.json();
-      if (!authData.authenticated) {
-        router.push("/login");
+      const { ok, status, data: foundUser } = await apiFetch(
+        `/user/search?email=${encodeURIComponent(email)}`,
+      );
+
+      if (status === 404) {
+        toast.error("No user found with that email");
+        return;
+      }
+      if (!ok || !foundUser || !foundUser.id) {
+        toast.error("User not found");
         return;
       }
 
-      const response = await fetch("http://localhost:8081/api/groups", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setGroups(Array.isArray(data) ? data : []);
-      } else {
-        setGroups([]);
-      }
-    } catch (error) {
-      console.error("Error fetching groups:", error);
-      setGroups([]);
+      setPendingInvites((prev) => [
+        ...prev,
+        {
+          id: foundUser.id,
+          email: foundUser.email || email,
+          first_name: foundUser.first_name || "",
+          last_name: foundUser.last_name || "",
+        },
+      ]);
+      setInviteEmail("");
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error");
     } finally {
-      setLoading(false);
+      setLookingUp(false);
     }
   };
 
+  const removePendingInvite = (id) => {
+    setPendingInvites((prev) => prev.filter((p) => p.id !== id));
+  };
+
+  // ---- Create group + send all pending invites --------------------------
   const handleCreateGroup = async (e) => {
     e.preventDefault();
-    if (!newGroup.title.trim()) {
+    if (!title.trim()) {
       toast.error("Group title is required");
       return;
     }
 
     setCreating(true);
     try {
-      const response = await fetch("http://localhost:8081/api/group/create", {
+      // 1. Create the group
+      const { ok: createOk, data: created } = await apiFetch("/group/create", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
+        json: {
+          title: title.trim(),
+          description: description.trim(),
         },
-        credentials: "include",
-        body: JSON.stringify({
-          title: newGroup.title,
-          description: newGroup.description || null,
-        }),
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error || data.message || "Failed to create group");
+      if (!createOk) {
+        toast.error(created.error || "Failed to create group");
+        return;
       }
 
-      toast.success("Group created successfully!");
-      setNewGroup({ title: "", description: "" });
-      setShowCreateForm(false);
-      // Refresh groups list
+      const groupId = created.id ?? created.group_id ?? created.ID;
+      if (!groupId) {
+        toast.error("Server did not return a group id");
+        return;
+      }
+
+      // 2. Send invites to every email the user added
+      if (pendingInvites.length > 0) {
+        const results = await Promise.allSettled(
+          pendingInvites.map((p) =>
+            apiFetch("/group/invite", {
+              method: "POST",
+              json: { group_id: Number(groupId), user_id: Number(p.id) },
+            }).then((r) => r.ok),
+          ),
+        );
+        const sent = results.filter(
+          (r) => r.status === "fulfilled" && r.value === true,
+        ).length;
+        const failed = pendingInvites.length - sent;
+
+        if (failed === 0) {
+          toast.success(
+            `Group created. ${sent} invitation${sent === 1 ? "" : "s"} sent.`,
+          );
+        } else if (sent === 0) {
+          toast.error("Group created, but all invitations failed.");
+        } else {
+          toast.success(`Group created. ${sent} sent, ${failed} failed.`);
+        }
+      } else {
+        toast.success("Group created");
+      }
+
+      // Reset form
+      setTitle("");
+      setDescription("");
+      setPendingInvites([]);
+      setInviteEmail("");
+      setInviteOpen(false);
+
       await fetchGroups();
-      // Navigate to the new group
-      if (data.group_id) {
-        router.push(`/groups/${data.group_id}`);
-      }
-    } catch (error) {
-      console.error("Error creating group:", error);
-      toast.error(error.message || "Failed to create group");
+    } catch (err) {
+      console.error(err);
+      toast.error("Network error");
     } finally {
       setCreating(false);
     }
   };
 
-  const handleJoinGroup = async (groupId) => {
-    try {
-      const response = await fetch("http://localhost:8081/api/group/join", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ group_id: groupId }),
-      });
-
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success(data.message || "Request sent successfully");
-        // Refresh groups
-        await fetchGroups();
-      } else {
-        toast.error(data.error || "Failed to join group");
-      }
-    } catch (error) {
-      console.error("Error joining group:", error);
-      toast.error("Failed to join group");
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
-      </div>
-    );
-  }
-
+  // ---- Render -----------------------------------------------------------
   return (
-    <div className='max-w-4xl mx-auto py-4 px-4'>
-      <div className='flex items-center justify-between mb-4'>
-        <h1 className='text-2xl font-bold'>Groups</h1>
+    <div className='groups-page'>
+      <div className='groups-header'>
+        <h1 className='groups-title'>Groups</h1>
         <button
-          onClick={() => setShowCreateForm(!showCreateForm)}
-          className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition'>
-          {showCreateForm ? "Cancel" : "+ Create Group"}
+          type='button'
+          onClick={() => router.back()}
+          className='groups-cancel'>
+          Cancel
         </button>
       </div>
 
-      {/* Create Group Form */}
-      {showCreateForm && (
-        <form
-          onSubmit={handleCreateGroup}
-          className='bg-white rounded-lg shadow p-4 mb-4'>
-          <input
-            id='group-title'
-            name='title'
-            type='text'
-            placeholder='Group Title *'
-            value={newGroup.title}
-            onChange={(e) =>
-              setNewGroup({ ...newGroup, title: e.target.value })
-            }
-            className='w-full px-3 py-2 border rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500'
-            required
-          />
-          <textarea
-            id='group-description'
-            name='description'
-            placeholder='Description (optional)'
-            value={newGroup.description}
-            onChange={(e) =>
-              setNewGroup({ ...newGroup, description: e.target.value })
-            }
-            rows='3'
-            className='w-full px-3 py-2 border rounded-lg mb-2 focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none'
-          />
-          <div className='flex justify-end'>
-            <button
-              type='submit'
-              disabled={creating || !newGroup.title.trim()}
-              className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50'>
-              {creating ? "Creating..." : "Create Group"}
-            </button>
-          </div>
-        </form>
-      )}
+      <form onSubmit={handleCreateGroup} className='groups-form'>
+        <input
+          type='text'
+          placeholder='Group Title *'
+          value={title}
+          onChange={(e) => setTitle(e.target.value)}
+          className='groups-input'
+          required
+        />
 
-      {/* Groups List */}
-      <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>
-        {groups.length === 0 ? (
-          <div className='col-span-2 bg-white rounded-lg shadow p-8 text-center'>
-            <p className='text-gray-500'>No groups found</p>
-            <p className='text-sm text-gray-400 mt-2'>
-              Create your first group!
-            </p>
+        <textarea
+          placeholder='Description (optional)'
+          value={description}
+          onChange={(e) => setDescription(e.target.value)}
+          rows={4}
+          className='groups-textarea'
+        />
+
+        {/* ---- + Invite button and popover ---- */}
+        <div className='groups-dropdown-wrapper' ref={inviteRef}>
+          <button
+            type='button'
+            onClick={() => setInviteOpen((v) => !v)}
+            className='groups-invite-btn'>
+            <span>
+              + Invite
+              {pendingInvites.length > 0 && (
+                <span className='groups-invite-count'>
+                  {" "}
+                  ({pendingInvites.length})
+                </span>
+              )}
+            </span>
+            <span className='groups-invite-arrow'>
+              {inviteOpen ? "▲" : "▼"}
+            </span>
+          </button>
+
+          {inviteOpen && (
+            <div className='groups-dropdown-panel'>
+              <form onSubmit={handleLookupEmail} className='groups-invite-form'>
+                <input
+                  type='email'
+                  placeholder='user@example.com'
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  className='groups-input'
+                  autoFocus
+                />
+                <button
+                  type='submit'
+                  disabled={lookingUp || !inviteEmail.trim()}
+                  className='groups-invite-add-btn'>
+                  {lookingUp ? "…" : "Add"}
+                </button>
+              </form>
+
+              {pendingInvites.length === 0 ? (
+                <div className='groups-dropdown-empty'>
+                  No one added yet — type an email above.
+                </div>
+              ) : (
+                pendingInvites.map((p) => (
+                  <div key={p.id} className='groups-dropdown-row'>
+                    <div className='groups-avatar'>
+                      {p.first_name?.[0]}
+                      {p.last_name?.[0]}
+                    </div>
+                    <div className='groups-user-info'>
+                      <div className='groups-user-name'>
+                        {p.first_name} {p.last_name}
+                      </div>
+                      <div className='groups-user-nick'>{p.email}</div>
+                    </div>
+                    <button
+                      type='button'
+                      onClick={() => removePendingInvite(p.id)}
+                      className='groups-invite-remove-btn'
+                      aria-label='Remove'>
+                      ×
+                    </button>
+                  </div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className='groups-submit-row'>
+          <button
+            type='submit'
+            disabled={creating}
+            className='groups-submit-btn'>
+            {creating ? "Creating…" : "Create Group"}
+          </button>
+        </div>
+      </form>
+
+      {/* ---- Groups list ---- */}
+      <div className='groups-list-section'>
+        <h2 className='groups-list-title'>All Groups</h2>
+        {loadingGroups ? (
+          <div className='groups-loading'>Loading…</div>
+        ) : groups.length === 0 ? (
+          <div className='groups-empty'>
+            No groups yet. Create the first one!
           </div>
         ) : (
-          groups.map((group) => (
-            <div
-              key={group.id}
-              onClick={() => router.push(`/groups/${group.id}`)}
-              className='bg-white rounded-lg shadow p-4 cursor-pointer hover:shadow-md transition'>
-              <h3 className='font-semibold text-lg'>{group.title}</h3>
-              <p className='text-gray-600 text-sm mt-1'>
-                {group.description || "No description"}
-              </p>
-              <div className='flex items-center justify-between mt-2'>
-                <span className='text-sm text-gray-500'>
-                  👥 {group.member_count || 0} members
-                </span>
-                {!group.is_member &&
-                  !group.has_pending_request &&
-                  !group.is_invited && (
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleJoinGroup(group.id);
-                      }}
-                      className='text-sm text-blue-500 hover:text-blue-700'>
-                      Join
-                    </button>
-                  )}
-                {group.has_pending_request && (
-                  <span className='text-sm text-yellow-500'>
-                    Request pending
-                  </span>
+          <div className='groups-list'>
+            {groups.map((g) => (
+              <Link key={g.id} href={`/groups/${g.id}`} className='groups-card'>
+                <h3 className='groups-card-title'>{g.title}</h3>
+                {g.description && (
+                  <p className='groups-card-desc'>{g.description}</p>
                 )}
-                {group.is_invited && (
-                  <span className='text-sm text-green-500'>Invited</span>
-                )}
-              </div>
-            </div>
-          ))
+                <div className='groups-card-meta'>
+                  <span>👥 {g.member_count ?? 0} members</span>
+                </div>
+              </Link>
+            ))}
+          </div>
         )}
       </div>
     </div>

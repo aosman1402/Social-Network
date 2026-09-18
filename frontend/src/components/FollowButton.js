@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
 
 export default function FollowButton({
   userId,
@@ -21,18 +22,12 @@ export default function FollowButton({
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8081/api/user/follow", {
+      const { ok, data } = await apiFetch("/user/follow", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ user_id: userId }),
+        json: { user_id: userId },
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (ok) {
         if (data.status === "pending") {
           setIsPending(true);
           toast.success("Follow request sent!");
@@ -58,22 +53,17 @@ export default function FollowButton({
     setLoading(true);
 
     try {
-      const response = await fetch("http://localhost:8081/api/user/unfollow", {
+      const { ok, data } = await apiFetch("/user/unfollow", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ user_id: userId }),
+        json: { user_id: userId },
       });
 
-      if (response.ok) {
+      if (ok) {
         setIsFollowing(false);
         setIsPending(false);
         toast.success("Unfollowed successfully!");
         if (onFollowChange) onFollowChange(false);
       } else {
-        const data = await response.json();
         toast.error(data.error || "Failed to unfollow user");
       }
     } catch (error) {
