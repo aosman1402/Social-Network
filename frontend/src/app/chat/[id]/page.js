@@ -4,100 +4,43 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { useAuth } from "@/context/AuthContext";
+import { useWebSocket } from "@/context/WebSocketContext";
 
 export default function ChatDetailPage() {
   const params = useParams();
   const router = useRouter();
-  const userId = params.id;
-  const [messages, setMessages] = useState([]); // ✅ Initialize as empty array
+  const userId = params.id; // the OTHER person in this conversation
+  const { user } = useAuth();
+  const { isConnected, send, subscribe } = useWebSocket();
+  const [messages, setMessages] = useState([]);
   const [newMessage, setNewMessage] = useState("");
   const [loading, setLoading] = useState(true);
   const [otherUser, setOtherUser] = useState(null);
-  const [isConnected, setIsConnected] = useState(false);
   const [sending, setSending] = useState(false);
   const messagesEndRef = useRef(null);
-  const wsRef = useRef(null);
 
-  // Connect WebSocket
+  // Load the other user's profile and this conversation's history.
   useEffect(() => {
-    let reconnectTimer = null;
-    let reconnectDelay = 1000;
-    const maxReconnectDelay = 30000;
-    let unmounting = false;
-
-    const connectWebSocket = () => {
-      const ws = new WebSocket("ws://localhost:8081/ws");
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        console.log("WebSocket connected");
-        setIsConnected(true);
-        reconnectDelay = 1000; // back to the short delay once we're healthy
-      };
-
-      ws.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          if (data.type === "chat") {
-            const msg = JSON.parse(data.data);
-            setMessages((prev) => [...prev, msg]);
-            scrollToBottom();
-          }
-        } catch (error) {
-          console.error("Error parsing message:", error);
-        }
-      };
-
-      ws.onclose = () => {
-        console.log("WebSocket disconnected");
-        setIsConnected(false);
-        if (unmounting) return;
-        // Reconnect with exponential backoff (capped at 30s) instead of
-        // leaving the chat silently offline until the user navigates away
-        // and back.
-        reconnectTimer = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
-          connectWebSocket();
-        }, reconnectDelay);
-      };
-
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
-    };
-
     const fetchChat = async () => {
       try {
-        // Get other user info
-        const userRes = await fetch(
-          `http://localhost:8081/api/user/profile?id=${userId}`,
-          {
-            credentials: "include",
-          },
+        const { ok: userOk, data: userData } = await apiFetch(
+          `/user/profile?id=${userId}`,
         );
-        if (userRes.ok) {
-          const data = await userRes.json();
-          setOtherUser(data);
+        if (userOk) {
+          setOtherUser(userData);
         } else {
           toast.error("User not found");
           router.push("/chat");
           return;
         }
 
-        // Get chat history
-        const msgRes = await fetch(
-          `http://localhost:8081/api/messages/history?user_id=${userId}`,
-          {
-            credentials: "include",
-          },
+        const { ok: msgOk, data: msgData } = await apiFetch(
+          `/messages/history?user_id=${userId}`,
         );
-        if (msgRes.ok) {
-          const data = await msgRes.json();
-          // ✅ Ensure data is an array
-          setMessages(Array.isArray(data) ? data : []);
-        } else {
-          setMessages([]);
-        }
+        setMessages(msgOk && Array.isArray(msgData) ? msgData : []);
       } catch (error) {
         console.error("Error fetching chat:", error);
         setMessages([]);
@@ -107,24 +50,22 @@ export default function ChatDetailPage() {
       }
     };
 
-    connectWebSocket();
     fetchChat();
-
-    return () => {
-      unmounting = true;
-      clearTimeout(reconnectTimer);
-      const ws = wsRef.current;
-      if (ws) {
-        if (ws.readyState === WebSocket.CONNECTING) {
-          // Closing mid-handshake logs a "closed before connection
-          // established" warning; wait for it to open, then close it.
-          ws.addEventListener("open", () => ws.close(), { once: true });
-        } else {
-          ws.close();
-        }
-      }
-    };
   }, [userId, router]);
+
+  // Live-append incoming messages that belong to this conversation. The
+  // shared socket delivers every "chat" event addressed to this user, not
+  // just ones from the person currently open here, so it has to be
+  // filtered by conversation partner.
+  useEffect(() => {
+    const otherUserId = parseInt(userId);
+    return subscribe("chat", (msg) => {
+      if (msg.sender_id !== otherUserId && msg.recipient_id !== otherUserId) {
+        return;
+      }
+      setMessages((prev) => [...prev, msg]);
+    });
+  }, [subscribe, userId]);
 
   useEffect(() => {
     scrollToBottom();
@@ -134,19 +75,14 @@ export default function ChatDetailPage() {
   // Re-runs whenever the message list changes or the socket (re)connects;
   // marking an already-read message again is a harmless no-op server-side.
   useEffect(() => {
-    if (!isConnected || !wsRef.current) return;
+    if (!isConnected) return;
     const otherUserId = parseInt(userId);
     messages
       .filter((m) => m.sender_id === otherUserId)
       .forEach((m) => {
-        wsRef.current.send(
-          JSON.stringify({
-            type: "read_receipt",
-            data: JSON.stringify({ message_id: m.id }),
-          }),
-        );
+        send({ type: "read_receipt", data: { message_id: m.id } });
       });
-  }, [isConnected, messages, userId]);
+  }, [isConnected, messages, userId, send]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -160,69 +96,41 @@ export default function ChatDetailPage() {
     const content = newMessage.trim();
     setNewMessage("");
 
-    // Try WebSocket first
-    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      const messageData = {
-        type: "chat",
-        data: JSON.stringify({
-          recipient_id: parseInt(userId),
-          content: content,
-        }),
-      };
-      wsRef.current.send(JSON.stringify(messageData));
+    const optimisticMsg = {
+      id: Date.now(),
+      sender_id: user.id,
+      content,
+      created_at: new Date().toISOString(),
+      sender: { first_name: "You", last_name: "" },
+    };
 
-      // Add optimistic message
-      const optimisticMsg = {
-        id: Date.now(),
-        sender_id: parseInt(userId),
-        content: content,
-        created_at: new Date().toISOString(),
-        sender: { first_name: "You", last_name: "" },
-      };
+    // Try WebSocket first
+    if (
+      send({
+        type: "chat",
+        data: { recipient_id: parseInt(userId), content },
+      })
+    ) {
       setMessages((prev) => [...prev, optimisticMsg]);
-      scrollToBottom();
       setSending(false);
       return;
     }
 
-    const msgRes = await fetch(
-      `http://localhost:8081/api/messages/history?user_id=${userId}`,
-      {
-        credentials: "include", // ✅ This is critical
-      },
-    );
-
     // Fallback: Use HTTP API
     try {
-      const response = await fetch("http://localhost:8081/api/messages/send", {
+      const { ok, data } = await apiFetch("/messages/send", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({
-          recipient_id: parseInt(userId),
-          content: content,
-        }),
+        json: { recipient_id: parseInt(userId), content },
       });
 
-      if (!response.ok) {
-        const data = await response.json();
+      if (!ok) {
         throw new Error(data.error || "Failed to send message");
       }
 
-      const data = await response.json();
-
-      // Add optimistic message
-      const optimisticMsg = {
-        id: data.message_id || Date.now(),
-        sender_id: parseInt(userId),
-        content: content,
-        created_at: new Date().toISOString(),
-        sender: { first_name: "You", last_name: "" },
-      };
-      setMessages((prev) => [...prev, optimisticMsg]);
-      scrollToBottom();
+      setMessages((prev) => [
+        ...prev,
+        { ...optimisticMsg, id: data.message_id || optimisticMsg.id },
+      ]);
     } catch (error) {
       console.error("Error sending message:", error);
       toast.error(error.message || "Failed to send message");
@@ -235,7 +143,7 @@ export default function ChatDetailPage() {
   if (loading) {
     return (
       <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+        <LoadingSpinner size='large' />
       </div>
     );
   }
@@ -286,25 +194,25 @@ export default function ChatDetailPage() {
             </div>
           ) : (
             messages.map((msg, index) => {
-              const isOwn = msg.sender_id === parseInt(userId);
+              const isTheirs = msg.sender_id === parseInt(userId);
               return (
                 <div
                   key={msg.id || index}
-                  className={`flex ${isOwn ? "justify-start" : "justify-end"}`}>
+                  className={`flex ${isTheirs ? "justify-start" : "justify-end"}`}>
                   <div
                     className={`max-w-[70%] p-3 rounded-lg ${
-                      isOwn
+                      isTheirs
                         ? "bg-gray-200 text-gray-800"
                         : "bg-blue-500 text-white"
                     }`}>
-                    {!isOwn && msg.sender && (
+                    {isTheirs && msg.sender && (
                       <p className='text-xs font-semibold text-blue-100 mb-1'>
                         {msg.sender.first_name}
                       </p>
                     )}
                     <p>{msg.content}</p>
                     <p
-                      className={`text-xs mt-1 ${isOwn ? "text-gray-500" : "text-blue-100"}`}>
+                      className={`text-xs mt-1 ${isTheirs ? "text-gray-500" : "text-blue-100"}`}>
                       {formatDistanceToNow(new Date(msg.created_at), {
                         addSuffix: true,
                       })}
@@ -329,7 +237,7 @@ export default function ChatDetailPage() {
           />
           <button
             type='submit'
-            disabled={!newMessage.trim() || sending || !isConnected}
+            disabled={!newMessage.trim() || sending}
             className='px-6 py-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition disabled:opacity-50'>
             {sending ? "Sending..." : "Send"}
           </button>

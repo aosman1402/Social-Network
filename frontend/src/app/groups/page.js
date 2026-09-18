@@ -4,11 +4,12 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "@/context/ToastContext";
-
-const API_BASE = "http://localhost:8081";
+import { apiFetch } from "@/lib/api";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function GroupsPage() {
   const router = useRouter();
+  const { user } = useRequireAuth();
 
   // ---- Create-group form state ------------------------------------------
   const [title, setTitle] = useState("");
@@ -26,30 +27,16 @@ export default function GroupsPage() {
   const [groups, setGroups] = useState([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
 
-  // Load groups on mount
+  const fetchGroups = async () => {
+    const { ok, data } = await apiFetch("/groups");
+    setGroups(ok && Array.isArray(data) ? data : []);
+  };
+
+  // Load groups once the shared auth check has resolved a signed-in user.
   useEffect(() => {
-    (async () => {
-      try {
-        const authRes = await fetch(`${API_BASE}/api/check-auth`, {
-          credentials: "include",
-        });
-        const authData = await authRes.json();
-        if (!authData.authenticated) {
-          router.push("/login");
-          return;
-        }
-        const res = await fetch(`${API_BASE}/api/groups`, {
-          credentials: "include",
-        });
-        const data = res.ok ? await res.json() : [];
-        setGroups(Array.isArray(data) ? data : data.groups || []);
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoadingGroups(false);
-      }
-    })();
-  }, [router]);
+    if (!user) return;
+    fetchGroups().finally(() => setLoadingGroups(false));
+  }, [user]);
 
   // Close invite popover on outside click
   useEffect(() => {
@@ -76,22 +63,15 @@ export default function GroupsPage() {
 
     setLookingUp(true);
     try {
-      const res = await fetch(
-        `${API_BASE}/api/user/search?email=${encodeURIComponent(email)}`,
-        { credentials: "include" },
+      const { ok, status, data: foundUser } = await apiFetch(
+        `/user/search?email=${encodeURIComponent(email)}`,
       );
 
-      if (res.status === 404) {
+      if (status === 404) {
         toast.error("No user found with that email");
         return;
       }
-      if (!res.ok) {
-        toast.error("Lookup failed");
-        return;
-      }
-
-      const user = await res.json();
-      if (!user || !user.id) {
+      if (!ok || !foundUser || !foundUser.id) {
         toast.error("User not found");
         return;
       }
@@ -99,10 +79,10 @@ export default function GroupsPage() {
       setPendingInvites((prev) => [
         ...prev,
         {
-          id: user.id,
-          email: user.email || email,
-          first_name: user.first_name || "",
-          last_name: user.last_name || "",
+          id: foundUser.id,
+          email: foundUser.email || email,
+          first_name: foundUser.first_name || "",
+          last_name: foundUser.last_name || "",
         },
       ]);
       setInviteEmail("");
@@ -129,23 +109,19 @@ export default function GroupsPage() {
     setCreating(true);
     try {
       // 1. Create the group
-      const createRes = await fetch(`${API_BASE}/api/group/create`, {
+      const { ok: createOk, data: created } = await apiFetch("/group/create", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
+        json: {
           title: title.trim(),
           description: description.trim(),
-        }),
+        },
       });
 
-      if (!createRes.ok) {
-        const err = await createRes.json().catch(() => ({}));
-        toast.error(err.error || "Failed to create group");
+      if (!createOk) {
+        toast.error(created.error || "Failed to create group");
         return;
       }
 
-      const created = await createRes.json();
       const groupId = created.id ?? created.group_id ?? created.ID;
       if (!groupId) {
         toast.error("Server did not return a group id");
@@ -156,14 +132,9 @@ export default function GroupsPage() {
       if (pendingInvites.length > 0) {
         const results = await Promise.allSettled(
           pendingInvites.map((p) =>
-            fetch(`${API_BASE}/api/group/invite`, {
+            apiFetch("/group/invite", {
               method: "POST",
-              headers: { "Content-Type": "application/json" },
-              credentials: "include",
-              body: JSON.stringify({
-                group_id: Number(groupId),
-                user_id: Number(p.id),
-              }),
+              json: { group_id: Number(groupId), user_id: Number(p.id) },
             }).then((r) => r.ok),
           ),
         );
@@ -192,14 +163,7 @@ export default function GroupsPage() {
       setInviteEmail("");
       setInviteOpen(false);
 
-      // Refresh groups list
-      const groupsRes = await fetch(`${API_BASE}/api/groups`, {
-        credentials: "include",
-      });
-      const groupsData = groupsRes.ok ? await groupsRes.json() : [];
-      setGroups(
-        Array.isArray(groupsData) ? groupsData : groupsData.groups || [],
-      );
+      await fetchGroups();
     } catch (err) {
       console.error(err);
       toast.error("Network error");

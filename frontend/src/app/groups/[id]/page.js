@@ -3,11 +3,14 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function GroupDetailPage() {
   const params = useParams();
   const router = useRouter();
   const groupId = params.id;
+  const { user, loading: authLoading } = useRequireAuth();
 
   const [group, setGroup] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -16,29 +19,20 @@ export default function GroupDetailPage() {
   const [pendingRequests, setPendingRequests] = useState([]);
 
   useEffect(() => {
+    if (!user || !groupId) return;
+
     const fetchGroup = async () => {
       try {
-        const authRes = await fetch("http://localhost:8081/api/check-auth", {
-          credentials: "include",
-        });
-        const authData = await authRes.json();
-        if (!authData.authenticated) {
-          router.push("/login");
-          return;
-        }
-
-        const response = await fetch(
-          `http://localhost:8081/api/group/detail?id=${groupId}`,
-          { credentials: "include" },
+        const { ok, status, data } = await apiFetch(
+          `/group/detail?id=${groupId}`,
         );
 
-        if (!response.ok) {
-          if (response.status === 404) setError("Group not found");
+        if (!ok) {
+          if (status === 404) setError("Group not found");
           else setError("Failed to load group");
           return;
         }
 
-        const data = await response.json();
         setGroup(data);
         setMembers(data.members || []);
         setPendingRequests(data.pending_requests || []);
@@ -50,20 +44,17 @@ export default function GroupDetailPage() {
       }
     };
 
-    if (groupId) fetchGroup();
-  }, [groupId, router]);
+    fetchGroup();
+  }, [groupId, user]);
 
   const handleJoinGroup = async () => {
     try {
-      const response = await fetch("http://localhost:8081/api/group/join", {
+      const { ok, data } = await apiFetch("/group/join", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ group_id: parseInt(groupId) }),
+        json: { group_id: parseInt(groupId) },
       });
-      const data = await response.json();
 
-      if (response.ok) {
+      if (ok) {
         toast.success(data.message || "Request sent successfully");
         window.location.reload();
       } else {
@@ -79,18 +70,15 @@ export default function GroupDetailPage() {
     if (!confirm("Are you sure you want to leave this group?")) return;
 
     try {
-      const response = await fetch("http://localhost:8081/api/group/leave", {
+      const { ok, data } = await apiFetch("/group/leave", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ group_id: parseInt(groupId) }),
+        json: { group_id: parseInt(groupId) },
       });
 
-      if (response.ok) {
+      if (ok) {
         toast.success("Left group successfully");
         router.push("/groups");
       } else {
-        const data = await response.json();
         toast.error(data.error || "Failed to leave group");
       }
     } catch (err) {
@@ -101,18 +89,15 @@ export default function GroupDetailPage() {
 
   const handleRequestAction = async (requestId, action) => {
     try {
-      const response = await fetch("http://localhost:8081/api/group/request", {
+      const { ok, data } = await apiFetch("/group/request", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ request_id: requestId, action }),
+        json: { request_id: requestId, action },
       });
 
-      if (response.ok) {
+      if (ok) {
         toast.success(`Request ${action}ed`);
         window.location.reload();
       } else {
-        const data = await response.json();
         toast.error(data.error || "Failed to process request");
       }
     } catch (err) {
@@ -121,7 +106,7 @@ export default function GroupDetailPage() {
     }
   };
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className='group-loading'>
         <div className='group-spinner' />
@@ -207,43 +192,37 @@ export default function GroupDetailPage() {
         </div>
 
         {/* Pending join requests (creator only) */}
-        {group.creator_id ===
-          parseInt(
-            typeof window !== "undefined"
-              ? localStorage.getItem("userId") || "0"
-              : "0",
-          ) &&
-          pendingRequests.length > 0 && (
-            <div className='group-section'>
-              <h3 className='group-section-title'>Pending Join Requests</h3>
-              <div className='group-section-body'>
-                {pendingRequests.map((req) => (
-                  <div key={req.id} className='group-member-row'>
-                    <div>
-                      <p className='group-member-name'>
-                        {req.user.first_name} {req.user.last_name}
-                      </p>
-                      <p className='group-member-nick'>
-                        @{req.user.nickname || req.user.first_name}
-                      </p>
-                    </div>
-                    <div className='group-member-actions'>
-                      <button
-                        onClick={() => handleRequestAction(req.id, "accept")}
-                        className='group-accept-btn'>
-                        Accept
-                      </button>
-                      <button
-                        onClick={() => handleRequestAction(req.id, "decline")}
-                        className='group-decline-btn'>
-                        Decline
-                      </button>
-                    </div>
+        {group.creator_id === user?.id && pendingRequests.length > 0 && (
+          <div className='group-section'>
+            <h3 className='group-section-title'>Pending Join Requests</h3>
+            <div className='group-section-body'>
+              {pendingRequests.map((req) => (
+                <div key={req.id} className='group-member-row'>
+                  <div>
+                    <p className='group-member-name'>
+                      {req.user.first_name} {req.user.last_name}
+                    </p>
+                    <p className='group-member-nick'>
+                      @{req.user.nickname || req.user.first_name}
+                    </p>
                   </div>
-                ))}
-              </div>
+                  <div className='group-member-actions'>
+                    <button
+                      onClick={() => handleRequestAction(req.id, "accept")}
+                      className='group-accept-btn'>
+                      Accept
+                    </button>
+                    <button
+                      onClick={() => handleRequestAction(req.id, "decline")}
+                      className='group-decline-btn'>
+                      Decline
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
-          )}
+          </div>
+        )}
 
         {/* Members */}
         <div className='group-section'>

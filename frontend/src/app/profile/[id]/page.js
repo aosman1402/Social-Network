@@ -5,6 +5,9 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import FollowRequests from "@/components/FollowRequests";
 import Avatar from "@/components/Avatar";
+import { apiFetch } from "@/lib/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 const VALID_TABS = ["posts", "followers", "following", "requests"];
 
@@ -13,6 +16,8 @@ export default function ProfileDetailPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const userId = params.id;
+  const { user: currentUser, loading: authLoading } = useRequireAuth();
+  const isOwnProfile = currentUser?.id === parseInt(userId);
 
   // A notification (e.g. "X requested to follow you") can deep-link here
   // with ?tab=requests so the recipient lands straight on the tab that
@@ -26,11 +31,9 @@ export default function ProfileDetailPage() {
   const [loading, setLoading] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(false);
   const [error, setError] = useState(null);
-  const [currentUser, setCurrentUser] = useState(null);
   const [activeTab, setActiveTab] = useState(initialTab);
   const [followers, setFollowers] = useState([]);
   const [following, setFollowing] = useState([]);
-  const [isOwnProfile, setIsOwnProfile] = useState(false);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
 
   // ✅ Format date function
@@ -69,43 +72,28 @@ export default function ProfileDetailPage() {
 
   // ✅ Fetch profile data
   useEffect(() => {
+    if (!currentUser || !userId) return;
+
     const fetchProfile = async () => {
       try {
         setLoading(true);
 
-        // 1. Check authentication and get current user
-        const authRes = await fetch("http://localhost:8081/api/check-auth", {
-          credentials: "include",
-        });
-        const authData = await authRes.json();
+        // 1. Fetch profile data
+        const {
+          ok: profileOk,
+          status: profileStatus,
+          data: profileData,
+        } = await apiFetch(`/user/profile?id=${userId}`);
 
-        if (!authData.authenticated) {
-          router.push("/login");
-          return;
-        }
-        setCurrentUser(authData);
-
-        // Check if this is the user's own profile
-        setIsOwnProfile(authData.id === parseInt(userId));
-
-        // 2. Fetch profile data
-        const profileRes = await fetch(
-          `http://localhost:8081/api/user/profile?id=${userId}`,
-          {
-            credentials: "include",
-          },
-        );
-
-        if (!profileRes.ok) {
-          if (profileRes.status === 404) {
+        if (!profileOk) {
+          if (profileStatus === 404) {
             setError("User not found");
-          } else if (profileRes.status === 403) {
+          } else if (profileStatus === 403) {
             // Private account, not (yet) an accepted follower - the body
             // still carries name/avatar/follow-status so this renders as
             // an identity card with a follow-request button, not a dead end.
-            const blocked = await profileRes.json().catch(() => null);
-            if (blocked) {
-              setProfile(blocked);
+            if (profileData) {
+              setProfile(profileData);
             } else {
               setError("This profile is private");
             }
@@ -115,7 +103,6 @@ export default function ProfileDetailPage() {
           return;
         }
 
-        const profileData = await profileRes.json();
         setProfile(profileData);
 
         // 3. Fetch user posts
@@ -128,14 +115,12 @@ export default function ProfileDetailPage() {
         // 5. On your own profile, get the pending-requests count up front
         // so the "Requests" tab shows it without having to click into it
         // first - FollowRequests itself keeps it live after that.
-        if (authData.id === parseInt(userId)) {
+        if (isOwnProfile) {
           try {
-            const reqRes = await fetch(
-              "http://localhost:8081/api/user/follow-requests",
-              { credentials: "include" },
+            const { ok: reqOk, data: reqData } = await apiFetch(
+              "/user/follow-requests",
             );
-            if (reqRes.ok) {
-              const reqData = await reqRes.json();
+            if (reqOk) {
               setPendingRequestsCount(
                 Array.isArray(reqData) ? reqData.length : 0,
               );
@@ -152,25 +137,15 @@ export default function ProfileDetailPage() {
       }
     };
 
-    if (userId) {
-      fetchProfile();
-    }
-  }, [userId, router]);
+    fetchProfile();
+  }, [userId, currentUser, isOwnProfile]);
 
   // ✅ Fetch user posts
   const fetchUserPosts = async (userId) => {
     setLoadingPosts(true);
     try {
-      const response = await fetch(
-        `http://localhost:8081/api/user/posts?id=${userId}`,
-        { credentials: "include" },
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setUserPosts(Array.isArray(data) ? data : []);
-      } else {
-        setUserPosts([]);
-      }
+      const { ok, data } = await apiFetch(`/user/posts?id=${userId}`);
+      setUserPosts(ok && Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching user posts:", error);
       setUserPosts([]);
@@ -182,12 +157,8 @@ export default function ProfileDetailPage() {
   // ✅ Fetch followers
   const fetchFollowers = async (userId) => {
     try {
-      const response = await fetch(
-        `http://localhost:8081/api/user/followers?id=${userId}`,
-        { credentials: "include" },
-      );
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await apiFetch(`/user/followers?id=${userId}`);
+      if (ok) {
         setFollowers(Array.isArray(data) ? data : []);
       }
     } catch (error) {
@@ -198,12 +169,8 @@ export default function ProfileDetailPage() {
   // ✅ Fetch following
   const fetchFollowing = async (userId) => {
     try {
-      const response = await fetch(
-        `http://localhost:8081/api/user/following?id=${userId}`,
-        { credentials: "include" },
-      );
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await apiFetch(`/user/following?id=${userId}`);
+      if (ok) {
         setFollowing(Array.isArray(data) ? data : []);
       }
     } catch (error) {
@@ -220,22 +187,14 @@ export default function ProfileDetailPage() {
     const wasFollowingOrPending = profile.is_following || profile.is_pending;
 
     try {
-      const url = wasFollowingOrPending
-        ? "http://localhost:8081/api/user/unfollow"
-        : "http://localhost:8081/api/user/follow";
+      const path = wasFollowingOrPending ? "/user/unfollow" : "/user/follow";
 
-      const response = await fetch(url, {
+      const { ok, data } = await apiFetch(path, {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ user_id: parseInt(userId) }),
+        json: { user_id: parseInt(userId) },
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (ok) {
         if (wasFollowingOrPending) {
           // Unfollowed (or cancelled a pending request).
           setProfile({
@@ -286,21 +245,17 @@ export default function ProfileDetailPage() {
     setTogglingPrivacy(true);
 
     try {
-      const response = await fetch("http://localhost:8081/api/user/update", {
+      const { ok, data } = await apiFetch("/user/update", {
         method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({
+        json: {
           first_name: profile.first_name,
           last_name: profile.last_name,
           about_me: profile.about_me || "",
           is_public: newIsPublic,
-        }),
+        },
       });
 
-      const data = await response.json();
-
-      if (response.ok) {
+      if (ok) {
         setProfile({ ...profile, is_public: newIsPublic });
         toast.success(
           newIsPublic
@@ -330,10 +285,10 @@ export default function ProfileDetailPage() {
   };
 
   // ✅ Loading state
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+        <LoadingSpinner size='large' />
       </div>
     );
   }
@@ -587,7 +542,7 @@ export default function ProfileDetailPage() {
             <div className='space-y-4'>
               {loadingPosts ? (
                 <div className='flex justify-center items-center py-8'>
-                  <div className='animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600'></div>
+                  <LoadingSpinner size='medium' />
                 </div>
               ) : userPosts.length === 0 ? (
                 <div className='text-center text-gray-400 py-8'>

@@ -1,42 +1,15 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
-import {
-  resizeImageFile,
-  isValidEmail,
-  isPasswordValid,
-  isValidNicknameFormat,
-  debounce,
-} from "@/utils/helpers";
+import { isValidEmail, isPasswordValid } from "@/utils/helpers";
 import PasswordRequirements from "@/components/PasswordRequirements";
-
-// Preset avatar options, generated from DiceBear's "clay" style
-// (https://www.dicebear.com/styles/clay/). Each preset pairs a fixed seed
-// with one of the approved background colors so the six options are stable
-// across renders instead of changing on every reload.
-const AVATAR_BACKGROUND_COLORS = [
-  "ff2e63",
-  "00c2a8",
-  "ffb300",
-  "3d5afe",
-  "8e24aa",
-  "00e676",
-];
-const AVATAR_SEEDS = ["Nova", "Comet", "Lumen", "Aster", "Orbit", "Quartz"];
-const DICEBEAR_AVATARS = AVATAR_SEEDS.map((seed, i) => ({
-  seed,
-  url: `https://api.dicebear.com/10.x/clay/svg?seed=${seed}&backgroundColor=${AVATAR_BACKGROUND_COLORS[i]}`,
-}));
-
-// Same allowlist the backend enforces (by sniffing the real file bytes) -
-// checked here first so the user gets immediate feedback instead of
-// waiting on a round trip for an upload that was always going to be rejected.
-const ALLOWED_AVATAR_TYPES = ["image/jpeg", "image/png", "image/gif"];
-const ALLOWED_AVATAR_EXTENSIONS = [".jpg", ".jpeg", ".png", ".gif"];
+import AvatarPicker from "@/components/AvatarPicker";
+import NicknameField from "@/components/NicknameField";
+import { apiFetch } from "@/lib/api";
 
 // Caps the date picker so a birth date can't be set in the future.
 const todayIsoDate = new Date().toISOString().split("T")[0];
@@ -68,82 +41,18 @@ export default function RegisterPage() {
 
   // Nickname (Optional): "idle" | "invalid" | "checking" | "available" | "taken" | "error"
   const [nicknameStatus, setNicknameStatus] = useState("idle");
-  // Tracks the most recently typed value so a slow/late availability
-  // response can't overwrite the status for a value the user has since
-  // changed (or cleared) - checked before applying the response below.
-  const latestNicknameRef = useRef("");
 
-  const checkNicknameAvailability = useRef(
-    debounce(async (nickname) => {
-      try {
-        const response = await fetch(
-          `http://localhost:8081/api/check-nickname?nickname=${encodeURIComponent(nickname)}`,
-          { credentials: "include" }
-        );
-        const data = await response.json();
-        if (latestNicknameRef.current !== nickname) return; // superseded
-        if (!data.valid) setNicknameStatus("invalid");
-        else setNicknameStatus(data.available ? "available" : "taken");
-      } catch (err) {
-        if (latestNicknameRef.current !== nickname) return;
-        setNicknameStatus("error");
-      }
-    }, 400)
-  ).current;
-
-  const handleNicknameChange = (e) => {
-    const value = e.target.value;
-    latestNicknameRef.current = value;
+  const handleNicknameValueChange = (value) => {
     setFormData((prev) => ({ ...prev, nickname: value }));
     if (errors.nickname) setErrors((prev) => ({ ...prev, nickname: "" }));
     setServerError("");
     setDebugInfo("");
-
-    if (!value) {
-      setNicknameStatus("idle");
-      return;
-    }
-    if (!isValidNicknameFormat(value)) {
-      setNicknameStatus("invalid");
-      return;
-    }
-    setNicknameStatus("checking");
-    checkNicknameAvailability(value);
   };
 
-  const handleAvatarFileChange = async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    const extension = file.name.slice(file.name.lastIndexOf(".")).toLowerCase();
-    const isAllowedType =
-      ALLOWED_AVATAR_TYPES.includes(file.type) ||
-      ALLOWED_AVATAR_EXTENSIONS.includes(extension);
-
-    if (!isAllowedType) {
-      setAvatarError("Please choose a JPG, PNG, or GIF image.");
-      setAvatarFile(null);
-      setAvatarPreviewUrl("");
-      e.target.value = "";
-      return;
-    }
-    if (file.size > 5 * 1024 * 1024) {
-      setAvatarError("Image must be less than 5MB.");
-      e.target.value = "";
-      return;
-    }
-
-    setAvatarError("");
-    try {
-      // Shrink dimensions/quality client-side before it ever reaches the
-      // server, so a full-resolution photo doesn't end up sitting in storage.
-      const resized = await resizeImageFile(file);
-      if (avatarPreviewUrl) URL.revokeObjectURL(avatarPreviewUrl);
-      setAvatarFile(resized);
-      setAvatarPreviewUrl(URL.createObjectURL(resized));
-    } catch (err) {
-      setAvatarError("Failed to process that image. Please try a different file.");
-    }
+  const handleAvatarFileChange = (file, previewUrl, errorMsg) => {
+    setAvatarFile(file);
+    setAvatarPreviewUrl(previewUrl);
+    setAvatarError(errorMsg);
   };
 
   const validateForm = () => {
@@ -212,23 +121,17 @@ export default function RegisterPage() {
       setDebugInfo("1. Sending registration request...");
       console.log("Sending registration:", payload);
 
-      const response = await fetch("http://localhost:8081/api/register", {
+      const { ok, status, data } = await apiFetch("/register", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify(payload),
+        json: payload,
       });
 
-      setDebugInfo(`2. Registration response status: ${response.status}`);
-      console.log("Registration response status:", response.status);
-
-      const data = await response.json();
+      setDebugInfo(`2. Registration response status: ${status}`);
+      console.log("Registration response status:", status);
       setDebugInfo(`3. Registration response: ${JSON.stringify(data)}`);
       console.log("Registration response:", data);
 
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(data.message || data.error || "Registration failed");
       }
 
@@ -255,18 +158,13 @@ export default function RegisterPage() {
               avatarFile,
               `avatar.${extensionByType[avatarFile.type] || "jpg"}`
             );
-            const avatarResponse = await fetch(
-              "http://localhost:8081/api/user/avatar",
-              {
-                method: "POST",
-                credentials: "include",
-                body: avatarForm,
-              }
+            const { ok: avatarOk, data: avatarData } = await apiFetch(
+              "/user/avatar",
+              { method: "POST", body: avatarForm }
             );
-            if (!avatarResponse.ok) {
-              const avatarData = await avatarResponse.json().catch(() => ({}));
+            if (!avatarOk) {
               toast.error(
-                avatarData.error ||
+                avatarData?.error ||
                   "Account created, but the avatar upload failed. You can add one later in Settings."
               );
             }
@@ -450,54 +348,14 @@ export default function RegisterPage() {
             )}
           </div>
 
-          <div>
-            <label
-              htmlFor='register-nickname'
-              className='block text-sm font-medium text-gray-700 mb-1'>
-              Nickname <span className='text-gray-400 text-xs'>(Optional)</span>
-            </label>
-            <input
-              id='register-nickname'
-              type='text'
-              name='nickname'
-              value={formData.nickname}
-              onChange={handleNicknameChange}
-              maxLength={14}
-              className='w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500'
-              placeholder='3-14 characters, letters and numbers'
-            />
-            {nicknameStatus === "checking" && (
-              <p className='text-gray-500 text-xs mt-1'>
-                ○ Checking availability...
-              </p>
-            )}
-            {nicknameStatus === "available" && (
-              <p className='text-green-700 text-xs mt-1'>
-                ✓ Nickname is available
-              </p>
-            )}
-            {nicknameStatus === "taken" && (
-              <p className='text-red-500 text-xs mt-1'>
-                ✕ Nickname is already taken
-              </p>
-            )}
-            {nicknameStatus === "invalid" && (
-              <p className='text-red-500 text-xs mt-1'>
-                ✕ 3-14 characters, letters and numbers only
-              </p>
-            )}
-            {nicknameStatus === "error" && (
-              <p className='text-red-500 text-xs mt-1'>
-                ✕ Could not check availability - try again
-              </p>
-            )}
-            {/* "invalid"/"taken"/"error" already have their own message
-                above; only "checking" needs this one, to explain why
-                submitting while the check is still in flight was blocked. */}
-            {errors.nickname && nicknameStatus === "checking" && (
-              <p className='text-red-500 text-sm mt-1'>{errors.nickname}</p>
-            )}
-          </div>
+          <NicknameField
+            id='register-nickname'
+            value={formData.nickname}
+            onValueChange={handleNicknameValueChange}
+            status={nicknameStatus}
+            onStatusChange={setNicknameStatus}
+            error={errors.nickname}
+          />
 
           <div>
             <label
@@ -517,77 +375,14 @@ export default function RegisterPage() {
           </div>
 
           <div>
-            {/* A group heading for the toggle buttons below, not a single
-                form field, so this is a <p> rather than a <label>. */}
-            <p className='block text-sm font-medium text-gray-700 mb-1'>
-              Avatar/Image <span className='text-gray-400 text-xs'>(Optional)</span>
-            </p>
-
-            <div className='flex gap-2 mb-2'>
-              {[
-                { value: "none", label: "No avatar" },
-                { value: "dicebear", label: "Choose an avatar" },
-                { value: "upload", label: "Upload a photo" },
-              ].map((option) => (
-                <button
-                  key={option.value}
-                  type='button'
-                  onClick={() => setAvatarChoice(option.value)}
-                  className={`px-3 py-1 text-sm rounded-lg border transition ${
-                    avatarChoice === option.value
-                      ? "bg-blue-600 text-white border-blue-600"
-                      : "border-gray-300 text-gray-700 hover:bg-gray-50"
-                  }`}>
-                  {option.label}
-                </button>
-              ))}
-            </div>
-
-            {avatarChoice === "dicebear" && (
-              <div className='grid grid-cols-3 gap-2'>
-                {DICEBEAR_AVATARS.map((avatar) => (
-                  <img
-                    key={avatar.seed}
-                    src={avatar.url}
-                    alt={`Avatar option: ${avatar.seed}`}
-                    onClick={() => setDicebearUrl(avatar.url)}
-                    className={`w-12 h-12 rounded-full cursor-pointer border-4 ${
-                      dicebearUrl === avatar.url
-                        ? "border-blue-500"
-                        : "border-white"
-                    }`}
-                  />
-                ))}
-              </div>
-            )}
-
-            {avatarChoice === "upload" && (
-              <div className='flex items-center gap-3'>
-                <label className='cursor-pointer px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition'>
-                  Choose file
-                  <input
-                    id='register-avatar-file'
-                    name='avatar'
-                    type='file'
-                    accept='.jpg,.jpeg,.png,.gif,image/jpeg,image/png,image/gif'
-                    onChange={handleAvatarFileChange}
-                    className='hidden'
-                  />
-                </label>
-                {avatarPreviewUrl && (
-                  <img
-                    src={avatarPreviewUrl}
-                    alt='Avatar preview'
-                    className='w-12 h-12 rounded-full object-cover border'
-                  />
-                )}
-              </div>
-            )}
-            {avatarChoice === "upload" && (
-              <p className='text-gray-400 text-xs mt-1'>
-                JPG, PNG, or GIF only - resized automatically before upload.
-              </p>
-            )}
+            <AvatarPicker
+              choice={avatarChoice}
+              onChoiceChange={setAvatarChoice}
+              dicebearUrl={dicebearUrl}
+              onDicebearUrlChange={setDicebearUrl}
+              avatarPreviewUrl={avatarPreviewUrl}
+              onFileChange={handleAvatarFileChange}
+            />
             {avatarError && (
               <p className='text-red-500 text-sm mt-1'>{avatarError}</p>
             )}

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
 
 export default function PostCard({ post, onUpdate, onDelete }) {
   const { user } = useAuth();
@@ -27,16 +28,8 @@ export default function PostCard({ post, onUpdate, onDelete }) {
   const fetchComments = async () => {
     setLoadingComments(true);
     try {
-      const response = await fetch(
-        `http://localhost:8081/api/post/comments?post_id=${post.id}`,
-        { credentials: "include" },
-      );
-      if (response.ok) {
-        const data = await response.json();
-        setComments(Array.isArray(data) ? data : []);
-      } else {
-        setComments([]);
-      }
+      const { ok, data } = await apiFetch(`/post/comments?post_id=${post.id}`);
+      setComments(ok && Array.isArray(data) ? data : []);
     } catch (error) {
       console.error("Error fetching comments:", error);
       setComments([]);
@@ -89,21 +82,18 @@ export default function PostCard({ post, onUpdate, onDelete }) {
         formData.append("image", commentImage);
       }
 
-      const response = await fetch("http://localhost:8081/api/post/comment", {
+      const { ok, data } = await apiFetch("/post/comment", {
         method: "POST",
-        credentials: "include",
         body: formData,
       });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (ok) {
         setComments([data.comment, ...comments]);
         setCommentContent("");
         removeCommentImage();
         toast.success("Comment added!");
         if (onUpdate) onUpdate();
       } else {
-        const data = await response.json();
         toast.error(data.error || "Failed to add comment");
       }
     } catch (error) {
@@ -123,65 +113,31 @@ export default function PostCard({ post, onUpdate, onDelete }) {
 
   // ✅ FIXED: Like handler with better error handling
   const handleLike = async () => {
-    console.log("🟢 Like button clicked for post:", post.id);
-    console.log("Current liked state:", liked);
-    console.log("Current like count:", likeCount);
-
     try {
-      console.log(
-        "🔄 Sending request to:",
-        `http://localhost:8081/api/post/like?id=${post.id}`,
-      );
+      const { ok, status, data } = await apiFetch(`/post/like?id=${post.id}`, {
+        method: "POST",
+      });
 
-      const response = await fetch(
-        `http://localhost:8081/api/post/like?id=${post.id}`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        },
-      );
-
-      console.log("📡 Response status:", response.status);
-
-      if (!response.ok) {
-        const errorData = await response.text();
-        console.error("❌ Error response:", errorData);
-        throw new Error(
-          `Server responded with ${response.status}: ${errorData}`,
-        );
+      if (!ok) {
+        throw new Error(data?.error || `Server responded with ${status}`);
       }
 
-      const data = await response.json();
-      console.log("✅ Like response data:", data);
-
-      if (response.ok) {
-        setLiked(data.liked);
-        setLikeCount(data.like_count || 0);
-        if (onUpdate) onUpdate();
-      } else {
-        toast.error(data.error || "Failed to like/unlike post");
-      }
+      setLiked(data.liked);
+      setLikeCount(data.like_count || 0);
+      if (onUpdate) onUpdate();
     } catch (error) {
-      console.error("❌ Error liking post:", error);
+      console.error("Error liking post:", error);
       toast.error("Failed to like post: " + error.message);
     }
   };
 
   const handleSave = async () => {
     try {
-      const response = await fetch(
-        `http://localhost:8081/api/post/save?id=${post.id}`,
-        {
-          method: "POST",
-          credentials: "include",
-        },
-      );
+      const { ok, data } = await apiFetch(`/post/save?id=${post.id}`, {
+        method: "POST",
+      });
 
-      if (response.ok) {
-        const data = await response.json();
+      if (ok) {
         setSaved(data.saved);
         toast.success(data.message);
       } else {
@@ -197,19 +153,14 @@ export default function PostCard({ post, onUpdate, onDelete }) {
     if (!confirm("Are you sure you want to delete this post?")) return;
 
     try {
-      const response = await fetch(
-        `http://localhost:8081/api/post/delete?id=${post.id}`,
-        {
-          method: "DELETE",
-          credentials: "include",
-        },
-      );
+      const { ok, data } = await apiFetch(`/post/delete?id=${post.id}`, {
+        method: "DELETE",
+      });
 
-      if (response.ok) {
+      if (ok) {
         toast.success("Post deleted!");
         if (onDelete) onDelete(post.id);
       } else {
-        const data = await response.json();
         toast.error(data.error || "Failed to delete post");
       }
     } catch (error) {

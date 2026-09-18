@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useState, useEffect } from "react";
 import { getDeviceFingerprint } from "@/utils/fingerprint";
+import { apiFetch } from "@/lib/api";
 
 const AuthContext = createContext();
 
@@ -11,11 +12,9 @@ export function AuthProvider({ children }) {
 
   const checkAuth = async () => {
     try {
-      const response = await fetch("http://localhost:8081/api/check-auth", {
-        credentials: "include",
+      const { data } = await apiFetch("/check-auth", {
         headers: { "X-Device-Fingerprint": await getDeviceFingerprint() },
       });
-      const data = await response.json();
       if (data.authenticated) {
         setUser(data);
         return data;
@@ -38,19 +37,13 @@ export function AuthProvider({ children }) {
 
   const login = async (email, password) => {
     try {
-      const response = await fetch("http://localhost:8081/api/login", {
+      const { ok, data } = await apiFetch("/login", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Device-Fingerprint": await getDeviceFingerprint(),
-        },
-        credentials: "include",
-        body: JSON.stringify({ email, password }),
+        headers: { "X-Device-Fingerprint": await getDeviceFingerprint() },
+        json: { email, password },
       });
 
-      const data = await response.json();
-
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(data.message || data.error || "Login failed");
       }
 
@@ -64,10 +57,7 @@ export function AuthProvider({ children }) {
 
   const logout = async () => {
     try {
-      await fetch("http://localhost:8081/api/logout", {
-        method: "POST",
-        credentials: "include",
-      });
+      await apiFetch("/logout", { method: "POST" });
       localStorage.clear();
       sessionStorage.clear();
       setUser(null);

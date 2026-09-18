@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { AuthProvider, useAuth } from "@/context/AuthContext";
 import { ToastProvider } from "@/context/ToastContext";
+import { WebSocketProvider } from "@/context/WebSocketContext";
 import NotificationBell from "@/components/NotificationBell";
 
 function Navbar() {
@@ -96,10 +97,12 @@ export default function RootLayout({ children }) {
       <body>
         <ToastProvider>
           <AuthProvider>
-            {!isAuthPage && <Navbar />}
-            <main className={!isAuthPage ? "max-w-7xl mx-auto p-4" : ""}>
-              {children}
-            </main>
+            <WebSocketProvider>
+              {!isAuthPage && <Navbar />}
+              <main className={!isAuthPage ? "max-w-7xl mx-auto p-4" : ""}>
+                {children}
+              </main>
+            </WebSocketProvider>
           </AuthProvider>
         </ToastProvider>
       </body>

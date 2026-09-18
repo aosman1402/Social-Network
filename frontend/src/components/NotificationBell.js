@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import { useAuth } from "@/context/AuthContext";
+import { useWebSocket } from "@/context/WebSocketContext";
+import { apiFetch } from "@/lib/api";
 
 function BellIcon({ size = 20 }) {
   return (
@@ -21,20 +23,16 @@ function BellIcon({ size = 20 }) {
 export default function NotificationBell() {
   const router = useRouter();
   const { user } = useAuth();
+  const { subscribe } = useWebSocket();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
-  const wsRef = useRef(null);
-  const reconnectTimerRef = useRef(null);
-  const reconnectDelayRef = useRef(1000);
-  const unmountingRef = useRef(false);
 
   useEffect(() => {
     fetchUnreadCount();
     fetchNotifications();
-    connectWebSocket();
 
     // Click outside to close dropdown
     const handleClickOutside = (event) => {
@@ -43,74 +41,21 @@ export default function NotificationBell() {
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
-    return () => {
-      document.removeEventListener("mousedown", handleClickOutside);
-      unmountingRef.current = true;
-      clearTimeout(reconnectTimerRef.current);
-      const ws = wsRef.current;
-      if (ws) {
-        if (ws.readyState === WebSocket.CONNECTING) {
-          // Closing mid-handshake logs a "closed before connection
-          // established" warning; wait for it to open, then close it.
-          ws.addEventListener("open", () => ws.close(), { once: true });
-        } else {
-          ws.close();
-        }
-      }
-    };
+    return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const connectWebSocket = () => {
-    const ws = new WebSocket("ws://localhost:8081/ws");
-    wsRef.current = ws;
-
-    ws.onopen = () => {
-      reconnectDelayRef.current = 1000; // back to the short delay once healthy
-    };
-
-    ws.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.type === "notification") {
-          const notification = JSON.parse(data.data);
-          setNotifications((prev) => [notification, ...prev]);
-          setUnreadCount((prev) => prev + 1);
-          toast.success(notification.content);
-        }
-      } catch (error) {
-        console.error("Error parsing notification:", error);
-      }
-    };
-
-    ws.onclose = () => {
-      if (unmountingRef.current) return;
-      // Reconnect with exponential backoff (capped at 30s) instead of
-      // leaving notifications silently offline until the next page visit.
-      const maxReconnectDelay = 30000;
-      reconnectTimerRef.current = setTimeout(() => {
-        reconnectDelayRef.current = Math.min(
-          reconnectDelayRef.current * 2,
-          maxReconnectDelay,
-        );
-        connectWebSocket();
-      }, reconnectDelayRef.current);
-    };
-
-    ws.onerror = (error) => {
-      console.error("Notification WebSocket error:", error);
-    };
-  };
+  useEffect(() => {
+    return subscribe("notification", (notification) => {
+      setNotifications((prev) => [notification, ...prev]);
+      setUnreadCount((prev) => prev + 1);
+      toast.success(notification.content);
+    });
+  }, [subscribe]);
 
   const fetchUnreadCount = async () => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/notifications/unread",
-        {
-          credentials: "include",
-        },
-      );
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await apiFetch("/notifications/unread");
+      if (ok) {
         setUnreadCount(data.unread_count || 0);
       }
     } catch (error) {
@@ -121,11 +66,8 @@ export default function NotificationBell() {
   const fetchNotifications = async () => {
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:8081/api/notifications", {
-        credentials: "include",
-      });
-      if (response.ok) {
-        const data = await response.json();
+      const { ok, data } = await apiFetch("/notifications");
+      if (ok) {
         setNotifications(data || []);
       }
     } catch (error) {
@@ -137,18 +79,11 @@ export default function NotificationBell() {
 
   const markAsRead = async (id) => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/notifications/read",
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({ notification_id: id }),
-        },
-      );
-      if (response.ok) {
+      const { ok } = await apiFetch("/notifications/read", {
+        method: "PUT",
+        json: { notification_id: id },
+      });
+      if (ok) {
         setNotifications((prev) =>
           prev.map((n) => (n.id === id ? { ...n, is_read: true } : n)),
         );
@@ -161,14 +96,10 @@ export default function NotificationBell() {
 
   const markAllAsRead = async () => {
     try {
-      const response = await fetch(
-        "http://localhost:8081/api/notifications/read-all",
-        {
-          method: "PUT",
-          credentials: "include",
-        },
-      );
-      if (response.ok) {
+      const { ok } = await apiFetch("/notifications/read-all", {
+        method: "PUT",
+      });
+      if (ok) {
         setNotifications((prev) => prev.map((n) => ({ ...n, is_read: true })));
         setUnreadCount(0);
         toast.success("All notifications marked as read");

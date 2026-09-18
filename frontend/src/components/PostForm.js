@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
 
 export default function PostForm({ onPostCreated }) {
   const { user } = useAuth();
@@ -23,10 +24,8 @@ export default function PostForm({ onPostCreated }) {
     setPrivacy(value);
     if (value === "private" && !followersLoaded && user?.id) {
       setLoadingFollowers(true);
-      fetch(`http://localhost:8081/api/user/followers?id=${user.id}`, {
-        credentials: "include",
-      })
-        .then((res) => (res.ok ? res.json() : []))
+      apiFetch(`/user/followers?id=${user.id}`)
+        .then(({ ok, data }) => (ok ? data : []))
         .then((data) => setFollowers(Array.isArray(data) ? data : []))
         .catch((error) => {
           console.error("Error loading followers:", error);
@@ -105,23 +104,13 @@ export default function PostForm({ onPostCreated }) {
         formData.append("image", image);
       }
 
-      // ✅ Debug: Log what's being sent
-      console.log("Sending post data:");
-      console.log("Content:", content);
-      console.log("Privacy:", privacy);
-      console.log("Image:", image ? image.name : "No image");
-
-      const response = await fetch("http://localhost:8081/api/post/create", {
+      const { ok, data } = await apiFetch("/post/create", {
         method: "POST",
-        credentials: "include",
         body: formData,
-        // ✅ Don't set Content-Type header - let browser set it with boundary
+        // Don't set Content-Type header - let the browser set it with boundary
       });
 
-      const data = await response.json();
-      console.log("Post response:", data);
-
-      if (!response.ok) {
+      if (!ok) {
         throw new Error(data.error || data.message || "Failed to create post");
       }
 

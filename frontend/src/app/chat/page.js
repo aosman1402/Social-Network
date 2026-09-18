@@ -2,49 +2,24 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { apiFetch } from "@/lib/api";
+import LoadingSpinner from "@/components/LoadingSpinner";
+import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
+import { useRequireAuth } from "@/hooks/useRequireAuth";
 
 export default function ChatPage() {
   const router = useRouter();
-  const [chats, setChats] = useState([]); // ✅ Initialize as empty array
+  const { user, loading: authLoading } = useRequireAuth();
+  const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    if (!user) return;
+
     const fetchChats = async () => {
       try {
-        const authRes = await fetch("http://localhost:8081/api/check-auth", {
-          credentials: "include",
-        });
-        const authData = await authRes.json();
-        if (!authData.authenticated) {
-          router.push("/login");
-          return;
-        }
-
-        // For now, use mock data until backend is ready
-        const mockChats = [
-          {
-            id: 1,
-            name: "John Doe",
-            lastMessage: "Hey there!",
-            time: "10:30 AM",
-            unread: 2,
-          },
-          {
-            id: 2,
-            name: "Jane Smith",
-            lastMessage: "See you tomorrow",
-            time: "9:15 AM",
-            unread: 0,
-          },
-          {
-            id: 3,
-            name: "Group Chat",
-            lastMessage: "Great idea!",
-            time: "Yesterday",
-            unread: 5,
-          },
-        ];
-        setChats(mockChats);
+        const { ok, data } = await apiFetch("/chats");
+        setChats(ok && Array.isArray(data) ? data : []);
       } catch (error) {
         console.error("Error fetching chats:", error);
         setChats([]);
@@ -54,12 +29,12 @@ export default function ChatPage() {
     };
 
     fetchChats();
-  }, [router]);
+  }, [user]);
 
-  if (loading) {
+  if (authLoading || loading) {
     return (
       <div className='flex justify-center items-center h-64'>
-        <div className='animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600'></div>
+        <LoadingSpinner size='large' />
       </div>
     );
   }
@@ -79,23 +54,33 @@ export default function ChatPage() {
           ) : (
             chats.map((chat) => (
               <div
-                key={chat.id}
-                onClick={() => router.push(`/chat/${chat.id}`)}
+                key={chat.other_user_id}
+                onClick={() => router.push(`/chat/${chat.other_user_id}`)}
                 className='p-4 hover:bg-gray-50 cursor-pointer transition flex items-center justify-between'>
                 <div className='flex items-center space-x-3'>
                   <div className='w-12 h-12 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-lg'>
-                    {chat.name.charAt(0)}
+                    {chat.other_user?.first_name?.[0] || "U"}
                   </div>
                   <div>
-                    <p className='font-semibold'>{chat.name}</p>
-                    <p className='text-sm text-gray-500'>{chat.lastMessage}</p>
+                    <p className='font-semibold'>
+                      {chat.other_user?.first_name} {chat.other_user?.last_name}
+                    </p>
+                    <p className='text-sm text-gray-500'>
+                      {chat.last_message || "No messages yet"}
+                    </p>
                   </div>
                 </div>
                 <div className='text-right'>
-                  <p className='text-xs text-gray-400'>{chat.time}</p>
-                  {chat.unread > 0 && (
+                  {chat.last_message_at && (
+                    <p className='text-xs text-gray-400'>
+                      {formatDistanceToNow(new Date(chat.last_message_at), {
+                        addSuffix: true,
+                      })}
+                    </p>
+                  )}
+                  {chat.unread_count > 0 && (
                     <span className='inline-block mt-1 bg-blue-500 text-white text-xs font-bold px-2 py-1 rounded-full'>
-                      {chat.unread}
+                      {chat.unread_count}
                     </span>
                   )}
                 </div>

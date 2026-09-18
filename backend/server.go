@@ -79,16 +79,10 @@ func main() {
     // Access-Control-Allow-Origin header at all (rather than falling back to
     // "*"), so the browser blocks the response instead of the server
     // advertising open access it doesn't mean to grant.
-    allowedOrigins := map[string]bool{
-        "http://localhost:3000": true,
-        "http://localhost:3001": true,
-        "http://127.0.0.1:3000": true,
-        "http://127.0.0.1:3001": true,
-    }
     cors := func(next http.HandlerFunc) http.HandlerFunc {
         return func(w http.ResponseWriter, r *http.Request) {
             origin := r.Header.Get("Origin")
-            if allowedOrigins[origin] {
+            if middleware.AllowedOrigins[origin] {
                 w.Header().Set("Access-Control-Allow-Origin", origin)
                 w.Header().Set("Access-Control-Allow-Credentials", "true")
             }

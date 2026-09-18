@@ -15,10 +15,6 @@ export function middleware(request) {
     (route) => pathname === route || pathname.startsWith(route + "/"),
   );
 
-  // Define API routes that should be excluded from middleware
-  const apiRoutes = ["/api/auth", "/api/register", "/api/login"];
-  const isApiRoute = apiRoutes.some((route) => pathname.startsWith(route));
-
   // Define protected routes (authentication required)
   const protectedRoutes = [
     "/profile",
@@ -45,18 +41,6 @@ export function middleware(request) {
     // Add the original URL as a redirect parameter
     loginUrl.searchParams.set("redirect", pathname);
     return NextResponse.redirect(loginUrl);
-  }
-
-  // Add the user token to request headers for API routes
-  if (token && isApiRoute) {
-    const requestHeaders = new Headers(request.headers);
-    requestHeaders.set("Authorization", `Bearer ${token.value}`);
-
-    return NextResponse.next({
-      request: {
-        headers: requestHeaders,
-      },
-    });
   }
 
   // Allow the request to proceed
