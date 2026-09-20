@@ -13,6 +13,10 @@ module.exports = {
   // node_modules it actually needs), which keeps the Docker runtime image
   // small and dependency-free.
   output: "standalone",
+  // Next.js 16 otherwise auto-generates AGENTS.md/CLAUDE.md files on every
+  // dev/build run. They're gitignored (never reach the repo either way),
+  // but there's no reason to have them regenerate on disk.
+  agentRules: false,
   async rewrites() {
     return [
       {

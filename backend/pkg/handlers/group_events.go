@@ -76,18 +76,42 @@ func (gh *GroupHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
     )
     if err == nil {
         defer rows.Close()
+        var memberIDs []int64
         for rows.Next() {
             var memberID int64
-            rows.Scan(&memberID)
-            gh.DB.Exec(
-                `INSERT INTO notifications (user_id, type, content, related_id, created_at)
-                 VALUES (?, 'event_created', ?, ?, ?)`,
-                memberID, "New event in "+groupTitle+": "+req.Title, eventID, time.Now(),
-            )
+            if err := rows.Scan(&memberID); err == nil {
+                memberIDs = append(memberIDs, memberID)
+            }
         }
         if err = rows.Err(); err != nil {
             writeJSONError(w, http.StatusInternalServerError, "Error iterating members")
             return
+        }
+
+        content := "New event in " + groupTitle + ": " + req.Title
+        createdAt := time.Now()
+        for _, memberID := range memberIDs {
+            // related_id is the group (not the event - there's no
+            // per-event page to link to, so a click takes members to the
+            // group, same as group_invitation/group_request_accepted).
+            result, err := gh.DB.Exec(
+                `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+                 VALUES (?, 'event_created', ?, ?, ?)`,
+                memberID, content, req.GroupID, createdAt,
+            )
+            if err != nil {
+                continue
+            }
+            notificationID, _ := result.LastInsertId()
+            gh.Hub.NotifyUser(memberID, map[string]interface{}{
+                "id":         notificationID,
+                "user_id":    memberID,
+                "type":       "event_created",
+                "content":    content,
+                "is_read":    false,
+                "related_id": req.GroupID,
+                "created_at": createdAt,
+            })
         }
     }
 

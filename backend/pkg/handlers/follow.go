@@ -105,7 +105,7 @@ func (uh *UserHandler) FollowUser(w http.ResponseWriter, r *http.Request) {
     )
     if err == nil {
         notificationID, _ := result.LastInsertId()
-        uh.notifyUser(req.UserID, map[string]interface{}{
+        uh.Hub.NotifyUser(req.UserID, map[string]interface{}{
             "id":         notificationID,
             "user_id":    req.UserID,
             "type":       notifType,
@@ -148,6 +148,15 @@ func (uh *UserHandler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    // Capture the status being removed before deleting it: a cancelled
+    // still-pending request never became a real follow relationship, so
+    // the target shouldn't be told they were "unfollowed" for it.
+    var previousStatus string
+    uh.DB.QueryRow(
+        "SELECT status FROM follows WHERE follower_id = ? AND following_id = ?",
+        followerID, req.UserID,
+    ).Scan(&previousStatus)
+
     result, err := uh.DB.Exec(
         "DELETE FROM follows WHERE follower_id = ? AND following_id = ?",
         followerID, req.UserID,
@@ -162,6 +171,34 @@ func (uh *UserHandler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
     if rowsAffected == 0 {
         writeJSONError(w, http.StatusBadRequest, "Not following this user")
         return
+    }
+
+    if previousStatus == "accepted" {
+        var followerName string
+        uh.DB.QueryRow(
+            "SELECT first_name || ' ' || last_name FROM users WHERE id = ?",
+            followerID,
+        ).Scan(&followerName)
+
+        content := followerName + " unfollowed you"
+        createdAt := time.Now()
+        notifResult, err := uh.DB.Exec(
+            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+             VALUES (?, 'unfollow', ?, ?, ?)`,
+            req.UserID, content, followerID, createdAt,
+        )
+        if err == nil {
+            notificationID, _ := notifResult.LastInsertId()
+            uh.Hub.NotifyUser(req.UserID, map[string]interface{}{
+                "id":         notificationID,
+                "user_id":    req.UserID,
+                "type":       "unfollow",
+                "content":    content,
+                "is_read":    false,
+                "related_id": followerID,
+                "created_at": createdAt,
+            })
+        }
     }
 
     json.NewEncoder(w).Encode(map[string]string{
@@ -230,7 +267,7 @@ func (uh *UserHandler) HandleFollowRequest(w http.ResponseWriter, r *http.Reques
         )
         if err == nil {
             notificationID, _ := result.LastInsertId()
-            uh.notifyUser(req.FollowerID, map[string]interface{}{
+            uh.Hub.NotifyUser(req.FollowerID, map[string]interface{}{
                 "id":         notificationID,
                 "user_id":    req.FollowerID,
                 "type":       "follow_accepted",

@@ -1,14 +1,39 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
+import { useSearchParams } from "next/navigation";
 import PostForm from "@/components/PostForm";
 import PostCard from "@/components/PostCard";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { apiFetch } from "@/lib/api";
 
 export default function HomePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className='flex justify-center items-center h-64'>
+          <LoadingSpinner size='large' />
+        </div>
+      }>
+      <HomeFeed />
+    </Suspense>
+  );
+}
+
+function HomeFeed() {
   const { user, loading } = useRequireAuth();
+  const searchParams = useSearchParams();
   const [posts, setPosts] = useState([]);
+
+  // A notification (like/comment) can deep-link here with ?post=<id> and,
+  // for a comment notification, &comment=<id> - the targeted post gets
+  // scrolled to and briefly highlighted, with its comments auto-expanded
+  // and the specific comment highlighted too.
+  const targetPostId = searchParams.get("post");
+  const targetCommentId = searchParams.get("comment");
+  const [highlightedPostId, setHighlightedPostId] = useState(null);
+  const handledTargetRef = useRef(null);
 
   const fetchPosts = async () => {
     try {
@@ -33,6 +58,39 @@ export default function HomePage() {
   useEffect(() => {
     if (user) fetchPosts();
   }, [user]);
+
+  // Make sure the deep-linked post is actually loaded (it may be older than
+  // the feed page, or the notified user may not follow its author but is
+  // still allowed to view it, e.g. as a named allowed_user on a private
+  // post), then scroll to it and highlight it briefly.
+  useEffect(() => {
+    if (!targetPostId || posts.length === 0) return;
+    if (handledTargetRef.current === targetPostId) return;
+
+    const targetId = parseInt(targetPostId, 10);
+    const loadedPost = posts.find((p) => p.id === targetId);
+
+    if (loadedPost) {
+      handledTargetRef.current = targetPostId;
+      setHighlightedPostId(targetId);
+      const el = document.getElementById(`post-${targetId}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      const timeout = setTimeout(() => setHighlightedPostId(null), 3000);
+      return () => clearTimeout(timeout);
+    }
+
+    let cancelled = false;
+    (async () => {
+      const { ok, data } = await apiFetch(`/post/get?id=${targetId}`);
+      if (!ok || cancelled) return;
+      setPosts((prev) =>
+        prev.some((p) => p.id === data.id) ? prev : [data, ...prev],
+      );
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [targetPostId, posts]);
 
   const handlePostCreated = () => {
     fetchPosts();
@@ -71,6 +129,17 @@ export default function HomePage() {
               post={post}
               onUpdate={fetchPosts}
               onDelete={handlePostDeleted}
+              highlighted={highlightedPostId === post.id}
+              autoOpenComments={
+                !!targetCommentId && targetPostId
+                  ? post.id === parseInt(targetPostId, 10)
+                  : false
+              }
+              highlightCommentId={
+                targetCommentId && post.id === parseInt(targetPostId, 10)
+                  ? parseInt(targetCommentId, 10)
+                  : null
+              }
             />
           ))
         )}

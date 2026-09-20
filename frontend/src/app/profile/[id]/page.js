@@ -186,6 +186,17 @@ export default function ProfileDetailPage() {
 
     const wasFollowingOrPending = profile.is_following || profile.is_pending;
 
+    // Only confirm an actual unfollow - cancelling a still-pending request
+    // isn't undoing a real relationship, so it doesn't need one.
+    if (
+      profile.is_following &&
+      !confirm(
+        `Unfollow ${profile.first_name} ${profile.last_name}? They'll be notified.`,
+      )
+    ) {
+      return;
+    }
+
     try {
       const path = wasFollowingOrPending ? "/user/unfollow" : "/user/follow";
 
@@ -242,6 +253,12 @@ export default function ProfileDetailPage() {
   const handleTogglePrivacy = async () => {
     if (!profile || togglingPrivacy) return;
     const newIsPublic = !profile.is_public;
+
+    const confirmMessage = newIsPublic
+      ? "Switching your profile to public will automatically accept all of your pending follow requests and notify those users. Continue?"
+      : "Switching your profile to private means new followers will need your approval, and only accepted followers will be able to see your posts and profile. Continue?";
+    if (!confirm(confirmMessage)) return;
+
     setTogglingPrivacy(true);
 
     try {

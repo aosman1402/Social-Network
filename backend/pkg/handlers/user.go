@@ -18,36 +18,6 @@ type UserHandler struct {
     Hub *websocket.Hub
 }
 
-// notifyUser pushes a notification to userID's live websocket connection(s),
-// if any are open, so the frontend can show it immediately instead of
-// waiting for the next page load/poll of /api/notifications. Hub is nil in
-// contexts (e.g. tests) that don't wire one up, and BroadcastToRoom is a
-// no-op when nobody is connected to that room, so this is always safe to call.
-func (uh *UserHandler) notifyUser(userID int64, notification map[string]interface{}) {
-    if uh.Hub == nil {
-        return
-    }
-
-    payload, err := json.Marshal(notification)
-    if err != nil {
-        return
-    }
-
-    // data is embedded as a raw JSON object (json.RawMessage), not a
-    // string - matching the "chat"/"ack" events broadcast by
-    // websocket.SendPrivateMessage and handleGroupMessage. The frontend's
-    // WebSocket handler parses the whole envelope in one pass and expects
-    // this to be consistent across every event type.
-    message, err := json.Marshal(map[string]interface{}{
-        "type": "notification",
-        "data": json.RawMessage(payload),
-    })
-    if err != nil {
-        return
-    }
-
-    uh.Hub.BroadcastToRoom("user_"+strconv.FormatInt(userID, 10), message)
-}
 
 // hasAcceptedFollow reports whether followerID has an accepted follow of
 // followingID.
@@ -256,6 +226,18 @@ func (uh *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    // Read the current visibility before overwriting it, so a private ->
+    // public transition can be detected below. canViewAccount grants full
+    // view access to anyone once an account is public, regardless of
+    // follow status - so a still-"pending" follow request left over from
+    // when this account was private would otherwise silently gain full
+    // access the moment it goes public, without the requester ever being
+    // formally accepted, without a notification to either side, and
+    // without ever counting towards followers_count or showing up in
+    // GetFollowers (both of which only count status = 'accepted').
+    var wasPublic bool
+    uh.DB.QueryRow("SELECT is_public FROM users WHERE id = ?", userID).Scan(&wasPublic)
+
     _, err := uh.DB.Exec(
         `UPDATE users SET first_name = ?, last_name = ?, about_me = ?, is_public = ?, updated_at = ?
          WHERE id = ?`,
@@ -268,8 +250,118 @@ func (uh *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    if !wasPublic && updates.IsPublic {
+        uh.autoAcceptPendingFollowsOnGoingPublic(userID)
+    }
+
     json.NewEncoder(w).Encode(map[string]string{
         "message": "Profile updated successfully",
+    })
+}
+
+// autoAcceptPendingFollowsOnGoingPublic bulk-accepts every pending follow
+// request against userID once their account switches from private to
+// public - a public account has no concept of "pending" (a fresh follow
+// request against a public account is accepted immediately, see
+// FollowUser), so a request left dangling from when the account was
+// private is brought in line with that the moment it goes public, rather
+// than staying silently stuck in the follows table forever. Notifies each
+// affected follower that their request was accepted, and the account
+// owner that their profile is now public.
+func (uh *UserHandler) autoAcceptPendingFollowsOnGoingPublic(userID int64) {
+    rows, err := uh.DB.Query(
+        "SELECT follower_id FROM follows WHERE following_id = ? AND status = 'pending'",
+        userID,
+    )
+    if err != nil {
+        log.Printf("autoAcceptPendingFollowsOnGoingPublic: failed to query pending follows for user %d: %v", userID, err)
+        return
+    }
+    var followerIDs []int64
+    for rows.Next() {
+        var followerID int64
+        if err := rows.Scan(&followerID); err == nil {
+            followerIDs = append(followerIDs, followerID)
+        }
+    }
+    rows.Close()
+
+    if len(followerIDs) == 0 {
+        uh.notifyProfileNowPublic(userID, 0)
+        return
+    }
+
+    if _, err := uh.DB.Exec(
+        "UPDATE follows SET status = 'accepted', updated_at = ? WHERE following_id = ? AND status = 'pending'",
+        time.Now(), userID,
+    ); err != nil {
+        log.Printf("autoAcceptPendingFollowsOnGoingPublic: failed to accept pending follows for user %d: %v", userID, err)
+        return
+    }
+
+    var ownerName string
+    uh.DB.QueryRow(
+        "SELECT first_name || ' ' || last_name FROM users WHERE id = ?", userID,
+    ).Scan(&ownerName)
+
+    for _, followerID := range followerIDs {
+        content := ownerName + " accepted your follow request"
+        createdAt := time.Now()
+        result, err := uh.DB.Exec(
+            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+             VALUES (?, 'follow_accepted', ?, ?, ?)`,
+            followerID, content, userID, createdAt,
+        )
+        if err != nil {
+            continue
+        }
+        notificationID, _ := result.LastInsertId()
+        uh.Hub.NotifyUser(followerID, map[string]interface{}{
+            "id":         notificationID,
+            "user_id":    followerID,
+            "type":       "follow_accepted",
+            "content":    content,
+            "is_read":    false,
+            "related_id": userID,
+            "created_at": createdAt,
+        })
+    }
+
+    uh.notifyProfileNowPublic(userID, len(followerIDs))
+}
+
+// notifyProfileNowPublic tells userID their profile switched to public,
+// mentioning how many previously-pending follow requests (if any) were
+// automatically approved as a result.
+func (uh *UserHandler) notifyProfileNowPublic(userID int64, approvedCount int) {
+    content := "Your profile is now public"
+    if approvedCount > 0 {
+        plural := "s"
+        if approvedCount == 1 {
+            plural = ""
+        }
+        content += ". " + strconv.Itoa(approvedCount) + " pending follow request" + plural + " " +
+            map[bool]string{true: "was", false: "were"}[approvedCount == 1] + " automatically approved"
+    }
+    content += "."
+
+    createdAt := time.Now()
+    result, err := uh.DB.Exec(
+        `INSERT INTO notifications (user_id, type, content, created_at)
+         VALUES (?, 'profile_public', ?, ?)`,
+        userID, content, createdAt,
+    )
+    if err != nil {
+        return
+    }
+    notificationID, _ := result.LastInsertId()
+    uh.Hub.NotifyUser(userID, map[string]interface{}{
+        "id":         notificationID,
+        "user_id":    userID,
+        "type":       "profile_public",
+        "content":    content,
+        "is_read":    false,
+        "created_at": createdAt,
     })
 }
 
@@ -340,29 +432,17 @@ func (uh *UserHandler) GetUserPosts(w http.ResponseWriter, r *http.Request) {
     limit, offset := parsePagination(r, 50, 100)
 
     // Even for a viewable (public, or accepted-follower) account, each post
-    // carries its own privacy_level - mirrors the same rule GetPosts (the
-    // main feed) applies: public to everyone, almost_private to accepted
-    // followers of the author, private/anything else to the author only.
+    // carries its own visibility - mirrors the same rule GetPosts (the main
+    // feed) applies, including that a group post is only shown here to a
+    // member of that group, never to the profile's other visitors.
     rows, err := uh.DB.Query(`
         SELECT `+postRowColumns+`
         FROM posts p
         JOIN users u ON p.user_id = u.id
-        WHERE p.user_id = ?
-          AND (
-              p.privacy_level = 'public'
-              OR p.user_id = ?
-              OR (p.privacy_level = 'almost_private' AND EXISTS (
-                  SELECT 1 FROM follows
-                  WHERE follower_id = ? AND following_id = p.user_id AND status = 'accepted'
-              ))
-              OR (p.privacy_level = 'private' AND EXISTS (
-                  SELECT 1 FROM post_allowed_users
-                  WHERE post_id = p.id AND user_id = ?
-              ))
-          )
+        WHERE p.user_id = ? AND `+postVisibilityClause+`
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
-    `, currentUserID, currentUserID, userID, currentUserID, currentUserID, currentUserID, limit, offset)
+    `, currentUserID, currentUserID, userID, currentUserID, currentUserID, currentUserID, currentUserID, limit, offset)
 
     if err != nil {
         writeJSONError(w, http.StatusInternalServerError, "Failed to get user posts")

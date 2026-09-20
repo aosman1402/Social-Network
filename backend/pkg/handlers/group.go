@@ -10,10 +10,12 @@ import (
 
     "social-network/pkg/middleware"
     "social-network/pkg/models"
+    "social-network/pkg/websocket"
 )
 
 type GroupHandler struct {
-    DB *sql.DB
+    DB  *sql.DB
+    Hub *websocket.Hub
 }
 
 type CreateGroupRequest struct {

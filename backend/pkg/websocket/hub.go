@@ -122,11 +122,27 @@ func (h *Hub) GetClientsInRoom(roomID string) []*Client {
 func (h *Hub) IsUserOnline(userID int64) bool {
     h.mutex.RLock()
     defer h.mutex.RUnlock()
-    
+
     // FIXED: use strconv.FormatInt
     roomID := "user_" + strconv.FormatInt(userID, 10)
     if clients, ok := h.Rooms[roomID]; ok {
         return len(clients) > 0
     }
     return false
+}
+
+// NotifyUser pushes a notification to userID's live websocket connection(s),
+// if any are open, so the frontend can show it immediately instead of
+// waiting for the next page load/poll of /api/notifications. Every handler
+// that creates a notification (posts, comments, follows, groups, events)
+// calls this right after inserting it, so nothing requires a manual
+// refresh to appear.
+//
+// h may be nil (contexts, e.g. tests, that don't wire a hub up) - safe to
+// call unconditionally either way.
+func (h *Hub) NotifyUser(userID int64, notification map[string]interface{}) {
+    if h == nil {
+        return
+    }
+    broadcastEvent(h, "user_"+strconv.FormatInt(userID, 10), "notification", notification)
 }

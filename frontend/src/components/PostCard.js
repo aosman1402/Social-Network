@@ -7,9 +7,16 @@ import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 
-export default function PostCard({ post, onUpdate, onDelete }) {
+export default function PostCard({
+  post,
+  onUpdate,
+  onDelete,
+  highlighted = false,
+  autoOpenComments = false,
+  highlightCommentId = null,
+}) {
   const { user } = useAuth();
-  const [showComments, setShowComments] = useState(false);
+  const [showComments, setShowComments] = useState(autoOpenComments);
   const [comments, setComments] = useState([]);
   const [commentContent, setCommentContent] = useState("");
   const [commentImage, setCommentImage] = useState(null);
@@ -111,6 +118,19 @@ export default function PostCard({ post, onUpdate, onDelete }) {
     setShowComments(!showComments);
   };
 
+  useEffect(() => {
+    if (autoOpenComments) {
+      fetchComments();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (!highlightCommentId || comments.length === 0) return;
+    const el = document.getElementById(`comment-${highlightCommentId}`);
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [comments, highlightCommentId]);
+
   // ✅ FIXED: Like handler with better error handling
   const handleLike = async () => {
     try {
@@ -181,7 +201,11 @@ export default function PostCard({ post, onUpdate, onDelete }) {
   };
 
   return (
-    <div className='bg-white rounded-lg shadow p-4 mb-4'>
+    <div
+      id={`post-${post.id}`}
+      className={`bg-white rounded-lg shadow p-4 mb-4 transition-shadow ${
+        highlighted ? "ring-2 ring-blue-400" : ""
+      }`}>
       {/* Post Header */}
       <div className='flex items-start justify-between'>
         <div className='flex items-start space-x-3'>
@@ -326,7 +350,14 @@ export default function PostCard({ post, onUpdate, onDelete }) {
               <p className='text-center text-gray-400'>No comments yet</p>
             ) : (
               comments.map((comment) => (
-                <div key={comment.id} className='flex items-start space-x-2'>
+                <div
+                  key={comment.id}
+                  id={`comment-${comment.id}`}
+                  className={`flex items-start space-x-2 rounded-lg transition-colors ${
+                    highlightCommentId === comment.id
+                      ? "bg-blue-50 ring-1 ring-blue-300 p-2 -m-2"
+                      : ""
+                  }`}>
                   <Link href={`/profile/${comment.user_id}`}>
                     <div className='w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-sm font-bold hover:opacity-80'>
                       {comment.user?.first_name?.[0] || "U"}

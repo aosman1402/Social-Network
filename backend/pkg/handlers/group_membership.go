@@ -72,13 +72,24 @@ func (gh *GroupHandler) InviteUserToGroup(w http.ResponseWriter, r *http.Request
         userID,
     ).Scan(&inviterName)
 
-    _, err = gh.DB.Exec(
+    inviteContent := inviterName + " invited you to join: " + groupTitle
+    inviteCreatedAt := time.Now()
+    result, err := gh.DB.Exec(
         `INSERT INTO notifications (user_id, type, content, related_id, created_at)
          VALUES (?, 'group_invitation', ?, ?, ?)`,
-        req.UserID, inviterName+" invited you to join: "+groupTitle, req.GroupID, time.Now(),
+        req.UserID, inviteContent, req.GroupID, inviteCreatedAt,
     )
-    if err != nil {
-        // Log error but don't fail
+    if err == nil {
+        notificationID, _ := result.LastInsertId()
+        gh.Hub.NotifyUser(req.UserID, map[string]interface{}{
+            "id":         notificationID,
+            "user_id":    req.UserID,
+            "type":       "group_invitation",
+            "content":    inviteContent,
+            "is_read":    false,
+            "related_id": req.GroupID,
+            "created_at": inviteCreatedAt,
+        })
     }
 
     json.NewEncoder(w).Encode(map[string]string{
@@ -138,13 +149,24 @@ func (gh *GroupHandler) RequestToJoinGroup(w http.ResponseWriter, r *http.Reques
         ).Scan(&notifCount)
 
         if notifCount == 0 {
-            _, err = gh.DB.Exec(
+            content := userName + " requested to join: " + groupTitle
+            createdAt := time.Now()
+            result, err := gh.DB.Exec(
                 `INSERT INTO notifications (user_id, type, content, related_id, created_at)
                  VALUES (?, 'group_request', ?, ?, ?)`,
-                creatorID, userName+" requested to join: "+groupTitle, req.GroupID, time.Now(),
+                creatorID, content, req.GroupID, createdAt,
             )
-            if err != nil {
-                // Log error but don't fail
+            if err == nil {
+                notificationID, _ := result.LastInsertId()
+                gh.Hub.NotifyUser(creatorID, map[string]interface{}{
+                    "id":         notificationID,
+                    "user_id":    creatorID,
+                    "type":       "group_request",
+                    "content":    content,
+                    "is_read":    false,
+                    "related_id": req.GroupID,
+                    "created_at": createdAt,
+                })
             }
         }
     }
@@ -202,13 +224,24 @@ func (gh *GroupHandler) HandleGroupRequest(w http.ResponseWriter, r *http.Reques
         var groupTitle string
         gh.DB.QueryRow("SELECT title FROM groups WHERE id = ?", groupID).Scan(&groupTitle)
 
-        _, err = gh.DB.Exec(
+        content := "Your request to join: " + groupTitle + " has been accepted"
+        createdAt := time.Now()
+        result, err := gh.DB.Exec(
             `INSERT INTO notifications (user_id, type, content, related_id, created_at)
              VALUES (?, 'group_request_accepted', ?, ?, ?)`,
-            requestingUserID, "Your request to join: "+groupTitle+" has been accepted", groupID, time.Now(),
+            requestingUserID, content, groupID, createdAt,
         )
-        if err != nil {
-            // Log error but don't fail
+        if err == nil {
+            notificationID, _ := result.LastInsertId()
+            gh.Hub.NotifyUser(requestingUserID, map[string]interface{}{
+                "id":         notificationID,
+                "user_id":    requestingUserID,
+                "type":       "group_request_accepted",
+                "content":    content,
+                "is_read":    false,
+                "related_id": groupID,
+                "created_at": createdAt,
+            })
         }
     }
 

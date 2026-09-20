@@ -5,6 +5,8 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import PostForm from "@/components/PostForm";
+import PostCard from "@/components/PostCard";
 
 export default function GroupDetailPage() {
   const params = useParams();
@@ -17,6 +19,8 @@ export default function GroupDetailPage() {
   const [error, setError] = useState(null);
   const [members, setMembers] = useState([]);
   const [pendingRequests, setPendingRequests] = useState([]);
+  const [posts, setPosts] = useState([]);
+  const [postsLoading, setPostsLoading] = useState(false);
 
   useEffect(() => {
     if (!user || !groupId) return;
@@ -36,6 +40,10 @@ export default function GroupDetailPage() {
         setGroup(data);
         setMembers(data.members || []);
         setPendingRequests(data.pending_requests || []);
+
+        if (data.is_member) {
+          fetchGroupPosts();
+        }
       } catch (err) {
         console.error("Error fetching group:", err);
         setError("Network error");
@@ -46,6 +54,27 @@ export default function GroupDetailPage() {
 
     fetchGroup();
   }, [groupId, user]);
+
+  const fetchGroupPosts = async () => {
+    setPostsLoading(true);
+    try {
+      const { ok, data } = await apiFetch(`/group/posts?group_id=${groupId}`);
+      setPosts(ok && Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("Error fetching group posts:", err);
+      setPosts([]);
+    } finally {
+      setPostsLoading(false);
+    }
+  };
+
+  const handlePostCreated = () => {
+    fetchGroupPosts();
+  };
+
+  const handlePostDeleted = (postId) => {
+    setPosts((prev) => prev.filter((p) => p.id !== postId));
+  };
 
   const handleJoinGroup = async () => {
     try {
@@ -190,6 +219,33 @@ export default function GroupDetailPage() {
             )}
           </div>
         </div>
+
+        {/* Posts - only group members can create or see group posts */}
+        {isMember && (
+          <div className='group-section'>
+            <h3 className='group-section-title'>Posts</h3>
+            <div className='group-section-body'>
+              <PostForm groupId={groupId} onPostCreated={handlePostCreated} />
+
+              {postsLoading ? (
+                <p className='group-empty'>Loading posts...</p>
+              ) : posts.length === 0 ? (
+                <p className='group-empty'>
+                  No posts yet - be the first to post!
+                </p>
+              ) : (
+                posts.map((post) => (
+                  <PostCard
+                    key={post.id}
+                    post={post}
+                    onUpdate={fetchGroupPosts}
+                    onDelete={handlePostDeleted}
+                  />
+                ))
+              )}
+            </div>
+          </div>
+        )}
 
         {/* Pending join requests (creator only) */}
         {group.creator_id === user?.id && pendingRequests.length > 0 && (

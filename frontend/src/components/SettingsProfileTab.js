@@ -24,6 +24,9 @@ export default function SettingsProfileTab({
   });
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  // The last-saved value, so a confirmation only fires when isPublic is
+  // actually being changed by this submit, not on every unrelated save.
+  const [savedIsPublic, setSavedIsPublic] = useState(true);
 
   useEffect(() => {
     if (!user) return;
@@ -39,6 +42,7 @@ export default function SettingsProfileTab({
             bio: data.about_me || "",
             isPublic: !!data.is_public,
           });
+          setSavedIsPublic(!!data.is_public);
         } else {
           toast.error("Failed to load profile");
         }
@@ -105,6 +109,17 @@ export default function SettingsProfileTab({
 
   const handleProfileSubmit = async (e) => {
     e.preventDefault();
+
+    if (profile.isPublic !== savedIsPublic) {
+      const confirmMessage = profile.isPublic
+        ? "Switching your profile to public will automatically accept all of your pending follow requests and notify those users. Continue?"
+        : "Switching your profile to private means new followers will need your approval, and only accepted followers will be able to see your posts and profile. Continue?";
+      if (!confirm(confirmMessage)) {
+        setProfile((prev) => ({ ...prev, isPublic: savedIsPublic }));
+        return;
+      }
+    }
+
     setIsLoading(true);
     setMessage("");
 
@@ -125,6 +140,7 @@ export default function SettingsProfileTab({
       }
 
       setMessage("Profile updated successfully!");
+      setSavedIsPublic(profile.isPublic);
       // Keep the shared auth user (navbar, profile page, etc.) in sync.
       setUser((prev) =>
         prev

@@ -44,6 +44,12 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    canView, err := canViewPost(ph.DB, postID, userID)
+    if err != nil || !canView {
+        writeJSONError(w, http.StatusForbidden, "You cannot comment on this post")
+        return
+    }
+
     // Handle image upload for comment
     var imagePath string
     file, header, err := r.FormFile("image")
@@ -97,13 +103,31 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
         "user":       user,
     }
 
-    // Send notification
+    // Send notification. related_id is the comment itself (so a click can
+    // scroll to and highlight this specific comment); post_id is the post
+    // it belongs to (so a click can navigate/scroll there first) - the two
+    // are different rows, so both need to travel with the notification.
     if postUserID != userID {
-        ph.DB.Exec(
-            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
-             VALUES (?, 'comment', ?, ?, ?)`,
-            postUserID, user.FirstName+" commented on your post", commentID, time.Now(),
+        content := user.FirstName + " commented on your post"
+        notifCreatedAt := time.Now()
+        result, err := ph.DB.Exec(
+            `INSERT INTO notifications (user_id, type, content, related_id, post_id, created_at)
+             VALUES (?, 'comment', ?, ?, ?, ?)`,
+            postUserID, content, commentID, postID, notifCreatedAt,
         )
+        if err == nil {
+            notificationID, _ := result.LastInsertId()
+            ph.Hub.NotifyUser(postUserID, map[string]interface{}{
+                "id":         notificationID,
+                "user_id":    postUserID,
+                "type":       "comment",
+                "content":    content,
+                "is_read":    false,
+                "related_id": commentID,
+                "post_id":    postID,
+                "created_at": notifCreatedAt,
+            })
+        }
     }
 
     w.Header().Set("Content-Type", "application/json")
@@ -115,10 +139,18 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
 
 // GetComments - Get comments for a post
 func (ph *PostHandler) GetComments(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+
     postIDStr := r.URL.Query().Get("post_id")
     postID, err := strconv.ParseInt(postIDStr, 10, 64)
     if err != nil {
         writeJSONError(w, http.StatusBadRequest, "Invalid post ID")
+        return
+    }
+
+    canView, err := canViewPost(ph.DB, postID, userID)
+    if err != nil || !canView {
+        writeJSONError(w, http.StatusForbidden, "You cannot view this post's comments")
         return
     }
 

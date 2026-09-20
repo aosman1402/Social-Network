@@ -5,12 +5,15 @@ import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
 import { useAuth } from "@/context/AuthContext";
+import { useWebSocket } from "@/context/WebSocketContext";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import { getNotificationIcon, getNotificationTarget } from "@/utils/helpers";
 
 export default function NotificationsPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
+  const { subscribe } = useWebSocket();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -22,6 +25,12 @@ export default function NotificationsPage() {
     }
     fetchNotifications();
   }, [user, authLoading, router]);
+
+  useEffect(() => {
+    return subscribe("notification", (notification) => {
+      setNotifications((prev) => [notification, ...prev]);
+    });
+  }, [subscribe]);
 
   const fetchNotifications = async () => {
     try {
@@ -64,27 +73,6 @@ export default function NotificationsPage() {
     } catch (error) {
       console.error("Error marking all as read:", error);
       toast.error("Failed to mark all as read");
-    }
-  };
-
-  const getNotificationIcon = (type) => {
-    switch (type) {
-      case "follow_request":
-      case "follow_accepted":
-      case "new_follower":
-        return "👤";
-      case "group_invitation":
-        return "👥";
-      case "group_request":
-        return "📩";
-      case "group_request_accepted":
-        return "✅";
-      case "event_created":
-        return "📅";
-      case "comment":
-        return "💬";
-      default:
-        return "🔔";
     }
   };
 
@@ -136,27 +124,7 @@ export default function NotificationsPage() {
                   if (!notification.is_read) {
                     markAsRead(notification.id);
                   }
-                  // Navigate based on type
-                  switch (notification.type) {
-                    case "follow_request":
-                      // related_id is the sender - land the recipient on
-                      // their OWN profile's Requests tab to act on it.
-                      router.push(`/profile/${user?.id}?tab=requests`);
-                      break;
-                    case "follow_accepted":
-                    case "new_follower":
-                      router.push(`/profile/${notification.related_id}`);
-                      break;
-                    case "group_invitation":
-                    case "group_request_accepted":
-                      router.push(`/groups/${notification.related_id}`);
-                      break;
-                    case "event_created":
-                      router.push(`/groups/${notification.related_id}`);
-                      break;
-                    default:
-                      break;
-                  }
+                  router.push(getNotificationTarget(notification, user?.id));
                 }}>
                 <div className='flex items-start space-x-3'>
                   <div className='text-2xl'>

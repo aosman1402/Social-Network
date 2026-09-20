@@ -10,10 +10,12 @@ import (
 
     "social-network/pkg/middleware"
     "social-network/pkg/models"
+    "social-network/pkg/websocket"
 )
 
 type PostHandler struct {
-    DB *sql.DB
+    DB  *sql.DB
+    Hub *websocket.Hub
 }
 
 // CreatePost - Create a new post with image
@@ -50,9 +52,22 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     var groupID *int64
     if groupIDStr != "" {
         id, err := strconv.ParseInt(groupIDStr, 10, 64)
-        if err == nil {
-            groupID = &id
+        if err != nil {
+            writeJSONError(w, http.StatusBadRequest, "Invalid group ID")
+            return
         }
+
+        var isMember bool
+        err = ph.DB.QueryRow(
+            "SELECT EXISTS(SELECT 1 FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active')",
+            id, userID,
+        ).Scan(&isMember)
+        if err != nil || !isMember {
+            writeJSONError(w, http.StatusForbidden, "You are not a member of this group")
+            return
+        }
+
+        groupID = &id
     }
 
     // Handle image upload
@@ -167,17 +182,7 @@ func (ph *PostHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
         SELECT `+postRowColumns+`
         FROM posts p
         JOIN users u ON p.user_id = u.id
-        WHERE p.privacy_level = 'public'
-           OR (p.privacy_level = 'almost_private' AND p.user_id IN (
-               SELECT following_id FROM follows WHERE follower_id = ? AND status = 'accepted'
-           ))
-           OR (p.privacy_level = 'private' AND p.id IN (
-               SELECT post_id FROM post_allowed_users WHERE user_id = ?
-           ))
-           OR p.user_id = ?
-           OR (p.group_id IS NOT NULL AND p.group_id IN (
-               SELECT group_id FROM group_members WHERE user_id = ? AND status = 'active'
-           ))
+        WHERE `+postVisibilityClause+`
         ORDER BY p.created_at DESC
         LIMIT ? OFFSET ?
     `, userID, userID, userID, userID, userID, userID, limit, offset)
@@ -204,6 +209,50 @@ func (ph *PostHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
 
     json.NewEncoder(w).Encode(posts)
+}
+
+// GetPost - Get a single post by ID, for when a notification points at a
+// post that isn't among whatever page of the feed is currently loaded
+// client-side (e.g. an old post, or one from before the feed's pagination
+// window). Applies the exact same visibility rules as GetPosts - just
+// narrowed to one row - so this can't be used to see a post the caller
+// wouldn't otherwise be allowed to see in the feed.
+func (ph *PostHandler) GetPost(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+
+    postIDStr := r.URL.Query().Get("id")
+    postID, err := strconv.ParseInt(postIDStr, 10, 64)
+    if err != nil {
+        writeJSONError(w, http.StatusBadRequest, "Invalid post ID")
+        return
+    }
+
+    rows, err := ph.DB.Query(`
+        SELECT `+postRowColumns+`
+        FROM posts p
+        JOIN users u ON p.user_id = u.id
+        WHERE p.id = ? AND `+postVisibilityClause+`
+    `, userID, userID, postID, userID, userID, userID, userID)
+
+    if err != nil {
+        log.Printf("GetPost: failed to query post %d: %v", postID, err)
+        writeJSONError(w, http.StatusInternalServerError, "Failed to get post")
+        return
+    }
+    defer rows.Close()
+
+    if !rows.Next() {
+        writeJSONError(w, http.StatusNotFound, "Post not found")
+        return
+    }
+
+    post, err := scanPostRow(rows)
+    if err != nil {
+        writeJSONError(w, http.StatusInternalServerError, "Failed to get post")
+        return
+    }
+
+    json.NewEncoder(w).Encode(post)
 }
 
 // DeletePost - Delete a post

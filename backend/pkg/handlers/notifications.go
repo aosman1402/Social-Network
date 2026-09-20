@@ -14,7 +14,7 @@ func (wsh *WebSocketHandler) GetNotifications(w http.ResponseWriter, r *http.Req
     limit, offset := parsePagination(r, 50, 100)
 
     rows, err := wsh.DB.Query(
-        `SELECT id, type, content, is_read, related_id, created_at
+        `SELECT id, type, content, is_read, related_id, post_id, created_at
          FROM notifications
          WHERE user_id = ?
          ORDER BY created_at DESC
@@ -31,7 +31,7 @@ func (wsh *WebSocketHandler) GetNotifications(w http.ResponseWriter, r *http.Req
     var notifications []Notification
     for rows.Next() {
         var n Notification
-        err := rows.Scan(&n.ID, &n.Type, &n.Content, &n.IsRead, &n.RelatedID, &n.CreatedAt)
+        err := rows.Scan(&n.ID, &n.Type, &n.Content, &n.IsRead, &n.RelatedID, &n.PostID, &n.CreatedAt)
         if err != nil {
             continue
         }

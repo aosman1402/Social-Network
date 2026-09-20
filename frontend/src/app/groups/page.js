@@ -16,11 +16,15 @@ export default function GroupsPage() {
   const [description, setDescription] = useState("");
   const [creating, setCreating] = useState(false);
 
-  // ---- Invite state -----------------------------------------------------
+  // ---- Invite state -------------------------------------------------------
+  // Picking invitees from the follower list (rather than looking each one
+  // up by email) - the list is fetched lazily, the first time the invite
+  // dropdown is opened, then kept for the rest of the visit.
   const [inviteOpen, setInviteOpen] = useState(false);
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [pendingInvites, setPendingInvites] = useState([]); // [{id, email, first_name, last_name}]
-  const [lookingUp, setLookingUp] = useState(false);
+  const [followers, setFollowers] = useState([]);
+  const [followersLoaded, setFollowersLoaded] = useState(false);
+  const [loadingFollowers, setLoadingFollowers] = useState(false);
+  const [selectedFollowerIds, setSelectedFollowerIds] = useState(new Set());
   const inviteRef = useRef(null);
 
   // ---- Groups list ------------------------------------------------------
@@ -49,56 +53,55 @@ export default function GroupsPage() {
     return () => document.removeEventListener("mousedown", onClick);
   }, []);
 
-  // ---- Add an email to the pending list (looks up the user first) ------
-  const handleLookupEmail = async (e) => {
-    e.preventDefault();
-    const email = inviteEmail.trim();
-    if (!email) return;
+  // Fetch the signed-in user's followers the first time the invite
+  // dropdown is opened.
+  useEffect(() => {
+    if (!inviteOpen || followersLoaded || !user) return;
 
-    // Avoid duplicates in the pending list
-    if (pendingInvites.some((p) => p.email === email)) {
-      toast.error("That email is already on the list");
-      return;
-    }
-
-    setLookingUp(true);
-    try {
-      const { ok, status, data: foundUser } = await apiFetch(
-        `/user/search?email=${encodeURIComponent(email)}`,
-      );
-
-      if (status === 404) {
-        toast.error("No user found with that email");
-        return;
+    (async () => {
+      setLoadingFollowers(true);
+      try {
+        const { ok, data } = await apiFetch(`/user/followers?id=${user.id}`);
+        if (ok && Array.isArray(data)) {
+          const sorted = [...data].sort((a, b) =>
+            `${a.user.first_name} ${a.user.last_name}`
+              .toLowerCase()
+              .localeCompare(
+                `${b.user.first_name} ${b.user.last_name}`.toLowerCase(),
+              ),
+          );
+          setFollowers(sorted);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        setLoadingFollowers(false);
+        setFollowersLoaded(true);
       }
-      if (!ok || !foundUser || !foundUser.id) {
-        toast.error("User not found");
-        return;
-      }
+    })();
+  }, [inviteOpen, followersLoaded, user]);
 
-      setPendingInvites((prev) => [
-        ...prev,
-        {
-          id: foundUser.id,
-          email: foundUser.email || email,
-          first_name: foundUser.first_name || "",
-          last_name: foundUser.last_name || "",
-        },
-      ]);
-      setInviteEmail("");
-    } catch (err) {
-      console.error(err);
-      toast.error("Network error");
-    } finally {
-      setLookingUp(false);
-    }
+  const toggleFollower = (id) => {
+    setSelectedFollowerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
   };
 
-  const removePendingInvite = (id) => {
-    setPendingInvites((prev) => prev.filter((p) => p.id !== id));
+  const allFollowersSelected =
+    followers.length > 0 && selectedFollowerIds.size === followers.length;
+
+  const toggleSelectAllFollowers = () => {
+    setSelectedFollowerIds(
+      allFollowersSelected
+        ? new Set()
+        : new Set(followers.map((f) => f.user.id)),
+    );
   };
 
-  // ---- Create group + send all pending invites --------------------------
+  // ---- Create group + send all invites to selected followers ------------
   const handleCreateGroup = async (e) => {
     e.preventDefault();
     if (!title.trim()) {
@@ -128,20 +131,23 @@ export default function GroupsPage() {
         return;
       }
 
-      // 2. Send invites to every email the user added
-      if (pendingInvites.length > 0) {
+      // 2. Invite every selected follower
+      const invitees = followers.filter((f) =>
+        selectedFollowerIds.has(f.user.id),
+      );
+      if (invitees.length > 0) {
         const results = await Promise.allSettled(
-          pendingInvites.map((p) =>
+          invitees.map((f) =>
             apiFetch("/group/invite", {
               method: "POST",
-              json: { group_id: Number(groupId), user_id: Number(p.id) },
+              json: { group_id: Number(groupId), user_id: Number(f.user.id) },
             }).then((r) => r.ok),
           ),
         );
         const sent = results.filter(
           (r) => r.status === "fulfilled" && r.value === true,
         ).length;
-        const failed = pendingInvites.length - sent;
+        const failed = invitees.length - sent;
 
         if (failed === 0) {
           toast.success(
@@ -159,8 +165,7 @@ export default function GroupsPage() {
       // Reset form
       setTitle("");
       setDescription("");
-      setPendingInvites([]);
-      setInviteEmail("");
+      setSelectedFollowerIds(new Set());
       setInviteOpen(false);
 
       await fetchGroups();
@@ -211,10 +216,10 @@ export default function GroupsPage() {
             className='groups-invite-btn'>
             <span>
               + Invite
-              {pendingInvites.length > 0 && (
+              {selectedFollowerIds.size > 0 && (
                 <span className='groups-invite-count'>
                   {" "}
-                  ({pendingInvites.length})
+                  ({selectedFollowerIds.size})
                 </span>
               )}
             </span>
@@ -225,49 +230,62 @@ export default function GroupsPage() {
 
           {inviteOpen && (
             <div className='groups-dropdown-panel'>
-              <form onSubmit={handleLookupEmail} className='groups-invite-form'>
-                <input
-                  type='email'
-                  placeholder='user@example.com'
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  className='groups-input'
-                  autoFocus
-                />
-                <button
-                  type='submit'
-                  disabled={lookingUp || !inviteEmail.trim()}
-                  className='groups-invite-add-btn'>
-                  {lookingUp ? "…" : "Add"}
-                </button>
-              </form>
-
-              {pendingInvites.length === 0 ? (
+              {loadingFollowers ? (
                 <div className='groups-dropdown-empty'>
-                  No one added yet — type an email above.
+                  Loading your followers…
+                </div>
+              ) : followers.length === 0 ? (
+                <div className='groups-dropdown-empty'>
+                  You don&apos;t have any followers yet to invite.
                 </div>
               ) : (
-                pendingInvites.map((p) => (
-                  <div key={p.id} className='groups-dropdown-row'>
-                    <div className='groups-avatar'>
-                      {p.first_name?.[0]}
-                      {p.last_name?.[0]}
-                    </div>
+                <>
+                  <div
+                    className='groups-dropdown-row groups-dropdown-row--all'
+                    onClick={toggleSelectAllFollowers}>
+                    <input
+                      type='checkbox'
+                      className='groups-checkbox'
+                      checked={allFollowersSelected}
+                      onChange={toggleSelectAllFollowers}
+                      onClick={(e) => e.stopPropagation()}
+                      aria-label='Select all followers'
+                    />
                     <div className='groups-user-info'>
-                      <div className='groups-user-name'>
-                        {p.first_name} {p.last_name}
-                      </div>
-                      <div className='groups-user-nick'>{p.email}</div>
+                      <div className='groups-user-name'>All Followers</div>
                     </div>
-                    <button
-                      type='button'
-                      onClick={() => removePendingInvite(p.id)}
-                      className='groups-invite-remove-btn'
-                      aria-label='Remove'>
-                      ×
-                    </button>
                   </div>
-                ))
+
+                  {followers.map((f) => (
+                    <div
+                      key={f.user.id}
+                      className='groups-dropdown-row'
+                      onClick={() => toggleFollower(f.user.id)}>
+                      <input
+                        type='checkbox'
+                        className='groups-checkbox'
+                        checked={selectedFollowerIds.has(f.user.id)}
+                        onChange={() => toggleFollower(f.user.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Invite ${f.user.first_name} ${f.user.last_name}`}
+                      />
+                      <div className='groups-avatar'>
+                        {f.user.first_name?.[0]}
+                        {f.user.last_name?.[0]}
+                      </div>
+                      <div className='groups-user-info'>
+                        <div className='groups-user-name'>
+                          {f.user.first_name} {f.user.last_name}
+                        </div>
+                        {f.user.nickname && (
+                          <div className='groups-user-nick'>
+                            @{f.user.nickname}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </>
               )}
             </div>
           )}

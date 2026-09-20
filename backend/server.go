@@ -58,8 +58,8 @@ func main() {
     // Initialize handlers
     authHandler := &handlers.AuthHandler{DB: db.DB}
     userHandler := &handlers.UserHandler{DB: db.DB, Hub: hub}
-    postHandler := &handlers.PostHandler{DB: db.DB}
-    groupHandler := &handlers.GroupHandler{DB: db.DB}
+    postHandler := &handlers.PostHandler{DB: db.DB, Hub: hub}
+    groupHandler := &handlers.GroupHandler{DB: db.DB, Hub: hub}
     wsHandler := &handlers.WebSocketHandler{
         DB:  db.DB,
         Hub: hub,
@@ -133,6 +133,7 @@ func main() {
 
     // ✅ POST ROUTES - ALL OF THEM
     http.HandleFunc("/api/posts", cors(authMiddleware.Authenticate(postHandler.GetPosts)))
+    http.HandleFunc("/api/post/get", cors(authMiddleware.Authenticate(postHandler.GetPost)))
     http.HandleFunc("/api/post/create", cors(authMiddleware.Authenticate(postHandler.CreatePost)))
     http.HandleFunc("/api/post/update", cors(authMiddleware.Authenticate(postHandler.UpdatePost)))
     http.HandleFunc("/api/post/delete", cors(authMiddleware.Authenticate(postHandler.DeletePost)))

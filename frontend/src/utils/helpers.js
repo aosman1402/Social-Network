@@ -1,4 +1,72 @@
 /**
+ * Map a notification's type to the emoji shown next to it. Shared between
+ * the notifications page and the notification bell dropdown - previously
+ * duplicated verbatim in both.
+ * @param {string} type - Notification type (e.g. "follow_accepted")
+ * @returns {string} A single emoji
+ */
+export const getNotificationIcon = (type) => {
+  switch (type) {
+    case "follow_request":
+    case "follow_accepted":
+    case "new_follower":
+      return "👤";
+    case "unfollow":
+      return "👋";
+    case "group_invitation":
+      return "👥";
+    case "group_request":
+      return "📩";
+    case "group_request_accepted":
+      return "✅";
+    case "event_created":
+      return "📅";
+    case "comment":
+      return "💬";
+    case "profile_public":
+      return "🌍";
+    default:
+      return "🔔";
+  }
+};
+
+/**
+ * Map a notification to the URL clicking it should navigate to. Shared
+ * between the notifications page and the notification bell dropdown -
+ * previously each had its own, independently-drifted switch statement.
+ * @param {object} notification - Notification object (type, related_id, post_id)
+ * @param {number|string} currentUserId - The signed-in user's id
+ * @returns {string} A path to navigate to
+ */
+export const getNotificationTarget = (notification, currentUserId) => {
+  const { type, related_id: relatedId, post_id: postId } = notification;
+  switch (type) {
+    case "follow_request":
+      // related_id here is the sender (the person who wants to follow
+      // you) - the recipient needs to land on their OWN profile's
+      // Requests tab to accept/decline, not on the sender's profile.
+      return `/profile/${currentUserId}?tab=requests`;
+    case "follow_accepted":
+    case "new_follower":
+    case "unfollow":
+      return `/profile/${relatedId}`;
+    case "group_invitation":
+    case "group_request":
+    case "group_request_accepted":
+    case "event_created":
+      return `/groups/${relatedId}`;
+    case "like":
+      return `/?post=${postId}`;
+    case "comment":
+      return `/?post=${postId}&comment=${relatedId}`;
+    case "profile_public":
+      return `/profile/${currentUserId}`;
+    default:
+      return "/notifications";
+  }
+};
+
+/**
  * Debounce a function call
  * @param {Function} fn - Function to debounce
  * @param {number} delay - Delay in milliseconds

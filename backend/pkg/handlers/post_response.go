@@ -62,3 +62,43 @@ func scanPostRow(rows *sql.Rows) (map[string]interface{}, error) {
         "is_saved":      isSaved,
     }, nil
 }
+
+// postVisibilityClause is the visibility rule shared by every "can this
+// user see this post" check (GetPosts, GetPost, GetUserPosts, canViewPost).
+// A group post (group_id set) is visible ONLY to the author or an active
+// member of that group - its privacy_level is irrelevant and never
+// consulted, since CreatePost defaults an unset privacy_level to "public"
+// and that clause would otherwise make every group post readable by
+// everyone, defeating the point of it belonging to a group. A non-group
+// post keeps the ordinary privacy_level-based rule (public, almost_private
+// to an accepted follower, private to a named allowed_user, or the
+// author). Expects, in order: userID (author check), userID (group
+// membership), userID (almost_private follower check), userID (private
+// allowlist check).
+const postVisibilityClause = `(
+    p.user_id = ?
+    OR (p.group_id IS NOT NULL AND p.group_id IN (
+        SELECT group_id FROM group_members WHERE user_id = ? AND status = 'active'
+    ))
+    OR (p.group_id IS NULL AND (
+        p.privacy_level = 'public'
+        OR (p.privacy_level = 'almost_private' AND p.user_id IN (
+            SELECT following_id FROM follows WHERE follower_id = ? AND status = 'accepted'
+        ))
+        OR (p.privacy_level = 'private' AND p.id IN (
+            SELECT post_id FROM post_allowed_users WHERE user_id = ?
+        ))
+    ))
+)`
+
+// canViewPost applies postVisibilityClause to a single post - shared so
+// comment endpoints can't be used to read or write comments on a post the
+// caller isn't otherwise allowed to see.
+func canViewPost(db *sql.DB, postID, userID int64) (bool, error) {
+    var canView bool
+    err := db.QueryRow(
+        `SELECT EXISTS(SELECT 1 FROM posts p WHERE p.id = ? AND `+postVisibilityClause+`)`,
+        postID, userID, userID, userID, userID,
+    ).Scan(&canView)
+    return canView, err
+}

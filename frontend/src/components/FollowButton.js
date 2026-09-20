@@ -50,6 +50,13 @@ export default function FollowButton({
 
   const handleUnfollow = async () => {
     if (loading) return;
+
+    // Only confirm an actual unfollow - cancelling a still-pending request
+    // isn't undoing a real relationship, so it doesn't need one.
+    if (isFollowing && !confirm("Unfollow this user? They'll be notified.")) {
+      return;
+    }
+
     setLoading(true);
 
     try {

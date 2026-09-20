@@ -70,11 +70,26 @@ func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
     if postUserID != userID {
         var userName string
         ph.DB.QueryRow("SELECT first_name FROM users WHERE id = ?", userID).Scan(&userName)
-        ph.DB.Exec(
-            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
-             VALUES (?, 'like', ?, ?, ?)`,
-            postUserID, userName+" liked your post", postID, time.Now(),
+        content := userName + " liked your post"
+        createdAt := time.Now()
+        result, err := ph.DB.Exec(
+            `INSERT INTO notifications (user_id, type, content, related_id, post_id, created_at)
+             VALUES (?, 'like', ?, ?, ?, ?)`,
+            postUserID, content, postID, postID, createdAt,
         )
+        if err == nil {
+            notificationID, _ := result.LastInsertId()
+            ph.Hub.NotifyUser(postUserID, map[string]interface{}{
+                "id":         notificationID,
+                "user_id":    postUserID,
+                "type":       "like",
+                "content":    content,
+                "is_read":    false,
+                "related_id": postID,
+                "post_id":    postID,
+                "created_at": createdAt,
+            })
+        }
     }
 
     var likeCount int

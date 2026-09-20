@@ -6,6 +6,7 @@ import { toast } from "@/context/ToastContext";
 import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { apiFetch } from "@/lib/api";
+import { getNotificationIcon, getNotificationTarget } from "@/utils/helpers";
 
 function BellIcon({ size = 20 }) {
   return (
@@ -115,53 +116,8 @@ export default function NotificationBell() {
       markAsRead(notification.id);
     }
 
-    // Navigate based on notification type
-    switch (notification.type) {
-      case "follow_request":
-        // related_id here is the sender (the person who wants to follow
-        // you) - the recipient needs to land on their OWN profile's
-        // Requests tab to accept/decline, not on the sender's profile.
-        router.push(`/profile/${user?.id}?tab=requests`);
-        break;
-      case "follow_accepted":
-      case "new_follower":
-        router.push(`/profile/${notification.related_id}`);
-        break;
-      case "group_invitation":
-      case "group_request_accepted":
-        router.push(`/groups/${notification.related_id}`);
-        break;
-      case "event_created":
-        router.push(`/groups/${notification.related_id}`);
-        break;
-      case "comment":
-        router.push(`/`);
-        break;
-      default:
-        router.push("/notifications");
-    }
+    router.push(getNotificationTarget(notification, user?.id));
     setShowDropdown(false);
-  };
-
-  const getNotificationIcon = (type) => {
-    switch (type) {
-      case "follow_request":
-      case "follow_accepted":
-      case "new_follower":
-        return "👤";
-      case "group_invitation":
-        return "👥";
-      case "group_request":
-        return "📩";
-      case "group_request_accepted":
-        return "✅";
-      case "event_created":
-        return "📅";
-      case "comment":
-        return "💬";
-      default:
-        return "🔔";
-    }
   };
 
   return (

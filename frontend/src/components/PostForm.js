@@ -5,7 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 
-export default function PostForm({ onPostCreated }) {
+export default function PostForm({ onPostCreated, groupId = null }) {
   const { user } = useAuth();
   const [content, setContent] = useState("");
   const [privacy, setPrivacy] = useState("public");
@@ -84,7 +84,7 @@ export default function PostForm({ onPostCreated }) {
       return;
     }
 
-    if (privacy === "private" && selectedViewerIds.length === 0) {
+    if (!groupId && privacy === "private" && selectedViewerIds.length === 0) {
       toast.error("Pick at least one follower who can see this post");
       return;
     }
@@ -94,11 +94,18 @@ export default function PostForm({ onPostCreated }) {
     try {
       const formData = new FormData();
       formData.append("content", content);
-      formData.append("privacy_level", privacy);
-      if (privacy === "private") {
-        selectedViewerIds.forEach((id) =>
-          formData.append("allowed_user_ids", id),
-        );
+      if (groupId) {
+        // Visibility for a group post is governed entirely by group
+        // membership (see canViewPost on the backend) - the privacy_level
+        // field is irrelevant here, so it's left at its default.
+        formData.append("group_id", groupId);
+      } else {
+        formData.append("privacy_level", privacy);
+        if (privacy === "private") {
+          selectedViewerIds.forEach((id) =>
+            formData.append("allowed_user_ids", id),
+          );
+        }
       }
       if (image) {
         formData.append("image", image);
@@ -183,18 +190,21 @@ export default function PostForm({ onPostCreated }) {
                 📷 <span className='text-sm'>Photo</span>
               </label>
 
-              {/* Privacy Selector */}
-              <select
-                id='post-privacy'
-                name='privacy'
-                value={privacy}
-                onChange={(e) => handlePrivacyChange(e.target.value)}
-                className='px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm'
-                disabled={loading}>
-                <option value='public'>🌍 Public</option>
-                <option value='almost_private'>👥 Almost Private</option>
-                <option value='private'>🔒 Private</option>
-              </select>
+              {/* Privacy Selector - not shown for group posts, whose
+                  visibility is governed by group membership instead */}
+              {!groupId && (
+                <select
+                  id='post-privacy'
+                  name='privacy'
+                  value={privacy}
+                  onChange={(e) => handlePrivacyChange(e.target.value)}
+                  className='px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm'
+                  disabled={loading}>
+                  <option value='public'>🌍 Public</option>
+                  <option value='almost_private'>👥 Almost Private</option>
+                  <option value='private'>🔒 Private</option>
+                </select>
+              )}
             </div>
 
             <button
@@ -208,7 +218,7 @@ export default function PostForm({ onPostCreated }) {
           {/* Viewer picker - only for 'private' posts, restricted to the
               author's own followers (only they're eligible to be granted
               access to a private post). */}
-          {privacy === "private" && (
+          {!groupId && privacy === "private" && (
             <div className='mt-2 p-3 border border-gray-200 rounded-lg bg-gray-50'>
               <p className='text-sm font-medium text-gray-700 mb-2'>
                 Who can see this post?
