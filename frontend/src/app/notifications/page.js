@@ -28,7 +28,13 @@ export default function NotificationsPage() {
 
   useEffect(() => {
     return subscribe("notification", (notification) => {
-      setNotifications((prev) => [notification, ...prev]);
+      setNotifications((prev) => {
+        // The initial GET-on-mount fetch can already include this row (it
+        // may have landed in the DB just before that request ran) - only
+        // the live push arriving after would otherwise double it up.
+        if (prev.some((item) => item.id === notification.id)) return prev;
+        return [notification, ...prev];
+      });
     });
   }, [subscribe]);
 

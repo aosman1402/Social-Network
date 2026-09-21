@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "@/context/ToastContext";
+import { useWebSocket } from "@/context/WebSocketContext";
 import FollowRequests from "@/components/FollowRequests";
 import Avatar from "@/components/Avatar";
 import { apiFetch } from "@/lib/api";
@@ -15,6 +16,7 @@ export default function ProfileDetailPage() {
   const params = useParams();
   const router = useRouter();
   const searchParams = useSearchParams();
+  const { subscribe } = useWebSocket();
   const userId = params.id;
   const { user: currentUser, loading: authLoading } = useRequireAuth();
   const isOwnProfile = currentUser?.id === parseInt(userId);
@@ -35,6 +37,32 @@ export default function ProfileDetailPage() {
   const [followers, setFollowers] = useState([]);
   const [following, setFollowing] = useState([]);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+
+  // A notification can deep-link here with a different ?tab= while this
+  // page is already mounted (e.g. still on your own profile when a follow
+  // request arrives) - the App Router reuses the existing page instance in
+  // that case rather than remounting it, so activeTab has to be re-synced
+  // from the URL explicitly instead of relying on the initialTab useState
+  // above, which only ever runs once.
+  useEffect(() => {
+    const tab = searchParams.get("tab");
+    if (VALID_TABS.includes(tab)) {
+      setActiveTab(tab);
+    }
+  }, [searchParams]);
+
+  // Bump the "Requests (N)" tab label live when a follow request comes in,
+  // even while sitting on a different tab - FollowRequests (which owns the
+  // authoritative count once it's mounted) only exists while the Requests
+  // tab itself is open, so it can't pick this up on its own.
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    return subscribe("notification", (notification) => {
+      if (notification.type === "follow_request") {
+        setPendingRequestsCount((prev) => prev + 1);
+      }
+    });
+  }, [isOwnProfile, subscribe]);
 
   // ✅ Format date function
   const formatDate = (dateString, fallback = "Recently joined") => {

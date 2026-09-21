@@ -171,7 +171,7 @@ func (ph *PostHandler) GetComments(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var comments []map[string]interface{}
+    comments := []map[string]interface{}{}
     for rows.Next() {
         var comment models.Comment
         var user models.User

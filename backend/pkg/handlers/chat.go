@@ -50,7 +50,7 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var chats []map[string]interface{}
+    chats := []map[string]interface{}{}
     for rows.Next() {
         var otherUserID int64
         var lastMessage sql.NullString
@@ -139,7 +139,7 @@ func (wsh *WebSocketHandler) GetChatHistory(w http.ResponseWriter, r *http.Reque
     }
     defer rows.Close()
 
-    var messages []ChatMessage
+    messages := []ChatMessage{}
     for rows.Next() {
         var msg ChatMessage
         var sender models.User
@@ -254,7 +254,7 @@ func (wsh *WebSocketHandler) GetGroupChatHistory(w http.ResponseWriter, r *http.
     }
     defer rows.Close()
 
-    var messages []ChatMessage
+    messages := []ChatMessage{}
     for rows.Next() {
         var msg ChatMessage
         var sender models.User

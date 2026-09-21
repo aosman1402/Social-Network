@@ -1,0 +1,162 @@
+.
+├── backend
+│   ├── pkg
+│   │   ├── db
+│   │   │   ├── migrations
+│   │   │   │   └── sqlite
+│   │   │   │       ├── 000001_create_users_table.down.sql
+│   │   │   │       ├── 000001_create_users_table.up.sql
+│   │   │   │       ├── 000002_create_sessions_table.down.sql
+│   │   │   │       ├── 000002_create_sessions_table.up.sql
+│   │   │   │       ├── 000003_create_follows_table.down.sql
+│   │   │   │       ├── 000003_create_follows_table.up.sql
+│   │   │   │       ├── 000004_create_posts_table.down.sql
+│   │   │   │       ├── 000004_create_posts_table.up.sql
+│   │   │   │       ├── 000005_create_comments_table.down.sql
+│   │   │   │       ├── 000005_create_comments_table.up.sql
+│   │   │   │       ├── 000006_create_groups_table.down.sql
+│   │   │   │       ├── 000006_create_groups_table.up.sql
+│   │   │   │       ├── 000007_create_group_members_table.down.sql
+│   │   │   │       ├── 000007_create_group_members_table.up.sql
+│   │   │   │       ├── 000008_create_events_table.down.sql
+│   │   │   │       ├── 000008_create_events_table.up.sql
+│   │   │   │       ├── 000009_create_messages_table.down.sql
+│   │   │   │       ├── 000009_create_messages_table.up.sql
+│   │   │   │       ├── 000010_create_notifications_table.down.sql
+│   │   │   │       ├── 000010_create_notifications_table.up.sql
+│   │   │   │       ├── 000011_create_post_likes_and_saves.down.sql
+│   │   │   │       ├── 000011_create_post_likes_and_saves.up.sql
+│   │   │   │       ├── 000012_add_read_at_to_messages.down.sql
+│   │   │   │       ├── 000012_add_read_at_to_messages.up.sql
+│   │   │   │       ├── 000013_add_session_security_fields.down.sql
+│   │   │   │       ├── 000013_add_session_security_fields.up.sql
+│   │   │   │       ├── 000014_create_post_allowed_users.down.sql
+│   │   │   │       ├── 000014_create_post_allowed_users.up.sql
+│   │   │   │       ├── 000015_add_post_id_to_notifications.down.sql
+│   │   │   │       └── 000015_add_post_id_to_notifications.up.sql
+│   │   │   └── sqlite
+│   │   │       ├── social-network.db
+│   │   │       └── sqlite.go
+│   │   ├── handlers
+│   │   │   ├── auth_integration_test.go
+│   │   │   ├── auth_validation_test.go
+│   │   │   ├── auth_validation.go
+│   │   │   ├── auth.go
+│   │   │   ├── chat.go
+│   │   │   ├── comment.go
+│   │   │   ├── follow_integration_test.go
+│   │   │   ├── follow.go
+│   │   │   ├── group_events.go
+│   │   │   ├── group_membership.go
+│   │   │   ├── group.go
+│   │   │   ├── notifications.go
+│   │   │   ├── pagination_test.go
+│   │   │   ├── pagination.go
+│   │   │   ├── post_integration_test.go
+│   │   │   ├── post_reactions.go
+│   │   │   ├── post_response.go
+│   │   │   ├── post.go
+│   │   │   ├── response.go
+│   │   │   ├── testutil_test.go
+│   │   │   ├── upload.go
+│   │   │   ├── user.go
+│   │   │   └── websocket.go
+│   │   ├── middleware
+│   │   │   ├── auth.go
+│   │   │   ├── cors.go
+│   │   │   └── ratelimit.go
+│   │   ├── models
+│   │   │   ├── group.go
+│   │   │   ├── message.go
+│   │   │   ├── post.go
+│   │   │   └── user.go
+│   │   └── websocket
+│   │       ├── client.go
+│   │       ├── hub_test.go
+│   │       ├── hub.go
+│   │       └── message.go
+│   ├── uploads
+│   │   ├── 8a7de49d-7022-440e-8c28-cd97604591b6.png
+│   │   ├── f7b22948-a871-4664-988e-81c8be0e167c.png
+│   │   └── fd03d5ff-2fdf-49e9-9669-3129ad8dfa19.png
+│   ├── .dockerignore
+│   ├── .env.example
+│   ├── Dockerfile
+│   ├── go.mod
+│   ├── go.sum
+│   └── server.go
+├── frontend
+│   ├── .swc
+│   │   └── plugins
+│   │       ├── macos_aarch64_30.0.1
+│   │       └── v7_macos_aarch64_0.106.15
+│   ├── src
+│   │   ├── app
+│   │   │   ├── chat
+│   │   │   │   ├── [id]
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── groups
+│   │   │   │   ├── [id]
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── login
+│   │   │   │   └── page.js
+│   │   │   ├── notifications
+│   │   │   │   └── page.js
+│   │   │   ├── profile
+│   │   │   │   ├── [id]
+│   │   │   │   │   └── page.js
+│   │   │   │   └── page.js
+│   │   │   ├── register
+│   │   │   │   └── page.js
+│   │   │   ├── settings
+│   │   │   │   └── page.js
+│   │   │   ├── favicon.ico
+│   │   │   ├── globals.css
+│   │   │   ├── layout.js
+│   │   │   └── page.js
+│   │   ├── components
+│   │   │   ├── Avatar.js
+│   │   │   ├── AvatarPicker.js
+│   │   │   ├── FollowButton.js
+│   │   │   ├── FollowRequests.js
+│   │   │   ├── LoadingSpinner.js
+│   │   │   ├── NicknameField.js
+│   │   │   ├── NotificationBell.js
+│   │   │   ├── PasswordRequirements.js
+│   │   │   ├── PostCard.js
+│   │   │   ├── PostForm.js
+│   │   │   ├── SettingsNotificationsTab.js
+│   │   │   ├── SettingsPasswordTab.js
+│   │   │   └── SettingsProfileTab.js
+│   │   ├── context
+│   │   │   ├── AuthContext.js
+│   │   │   ├── ToastContext.js
+│   │   │   └── WebSocketContext.js
+│   │   ├── hooks
+│   │   │   └── useRequireAuth.js
+│   │   ├── lib
+│   │   │   ├── api.js
+│   │   │   └── formatDistanceToNow.js
+│   │   └── utils
+│   │       ├── fingerprint.js
+│   │       ├── helpers.js
+│   │       └── helpers.test.js
+│   ├── .dockerignore
+│   ├── .env.example
+│   ├── Dockerfile
+│   ├── jest.config.js
+│   ├── jsconfig.json
+│   ├── middleware.js
+│   ├── next.config.js
+│   ├── package-lock.json
+│   └── package.json
+├── .gitignore
+├── AUDIT.md
+├── CLAUDE.md
+├── docker-compose.yml
+├── PROJECT_TREE.txt
+└── README.md
+
+34 directories, 126 files

@@ -145,7 +145,7 @@ func (gh *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
         groupID,
     ).Scan(&memberCount)
 
-    var members []map[string]interface{}
+    members := []map[string]interface{}{}
     if isMember {
         rows, err := gh.DB.Query(
             `SELECT u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path, u.is_public,
@@ -181,7 +181,7 @@ func (gh *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
         }
     }
 
-    var pendingRequests []map[string]interface{}
+    pendingRequests := []map[string]interface{}{}
     if userID == group.CreatorID {
         rows, err := gh.DB.Query(
             `SELECT gm.id, gm.user_id, gm.created_at,
@@ -261,7 +261,7 @@ func (gh *GroupHandler) GetAllGroups(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var groups []map[string]interface{}
+    groups := []map[string]interface{}{}
     for rows.Next() {
         var group struct {
             ID        int64     `json:"id"`
@@ -322,7 +322,7 @@ func (gh *GroupHandler) GetMyGroups(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var groups []map[string]interface{}
+    groups := []map[string]interface{}{}
     for rows.Next() {
         var group struct {
             ID        int64     `json:"id"`
@@ -395,7 +395,7 @@ func (gh *GroupHandler) GetGroupPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var posts []map[string]interface{}
+    posts := []map[string]interface{}{}
     for rows.Next() {
         post, err := scanPostRow(rows)
         if err != nil {

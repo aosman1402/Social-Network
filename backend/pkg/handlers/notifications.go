@@ -28,7 +28,7 @@ func (wsh *WebSocketHandler) GetNotifications(w http.ResponseWriter, r *http.Req
     }
     defer rows.Close()
 
-    var notifications []Notification
+    notifications := []Notification{}
     for rows.Next() {
         var n Notification
         err := rows.Scan(&n.ID, &n.Type, &n.Content, &n.IsRead, &n.RelatedID, &n.PostID, &n.CreatedAt)

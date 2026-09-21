@@ -194,7 +194,7 @@ func (ph *PostHandler) GetPosts(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var posts []map[string]interface{}
+    posts := []map[string]interface{}{}
     for rows.Next() {
         post, err := scanPostRow(rows)
         if err != nil {

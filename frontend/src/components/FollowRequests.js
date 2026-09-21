@@ -3,17 +3,32 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
+import { useWebSocket } from "@/context/WebSocketContext";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 
 export default function FollowRequests({ onRequestHandled, onCountChange }) {
   const router = useRouter();
+  const { subscribe } = useWebSocket();
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     fetchRequests();
   }, []);
+
+  // Refetch on a live "follow_request" notification instead of relying on
+  // navigation to re-trigger a fetch - clicking the notification when
+  // you're already sitting on this tab doesn't produce a navigation event
+  // at all (same URL), so the list would otherwise never learn about the
+  // new pending request without a manual page reload.
+  useEffect(() => {
+    return subscribe("notification", (notification) => {
+      if (notification.type === "follow_request") {
+        fetchRequests();
+      }
+    });
+  }, [subscribe]);
 
   // Report the current pending count up to the parent whenever it changes
   // (initial load, and after each accept/decline) so a tab label showing
@@ -26,7 +41,7 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
     try {
       const { ok, data } = await apiFetch("/user/follow-requests");
       if (ok) {
-        setRequests(data);
+        setRequests(Array.isArray(data) ? data : []);
       }
     } catch (error) {
       console.error("Error fetching follow requests:", error);

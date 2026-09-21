@@ -168,7 +168,7 @@ func (gh *GroupHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var events []map[string]interface{}
+    events := []map[string]interface{}{}
     for rows.Next() {
         var event struct {
             ID          int64      `json:"id"`
@@ -197,7 +197,7 @@ func (gh *GroupHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
             event.ID, userID,
         ).Scan(&userResponse)
 
-        var responses []map[string]interface{}
+        responses := []map[string]interface{}{}
         rows2, err := gh.DB.Query(
             `SELECT er.user_id, er.response, er.created_at,
                     u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path, u.is_public

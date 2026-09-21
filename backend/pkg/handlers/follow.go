@@ -306,7 +306,7 @@ func (uh *UserHandler) GetFollowRequests(w http.ResponseWriter, r *http.Request)
     }
     defer rows.Close()
 
-    var requests []map[string]interface{}
+    requests := []map[string]interface{}{}
     for rows.Next() {
         var follow struct{ ID, FollowerID int64 }
         var status string
@@ -376,7 +376,7 @@ func (uh *UserHandler) GetFollowers(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var followers []map[string]interface{}
+    followers := []map[string]interface{}{}
     for rows.Next() {
         var user models.User
         var status string
@@ -442,7 +442,7 @@ func (uh *UserHandler) GetFollowing(w http.ResponseWriter, r *http.Request) {
     }
     defer rows.Close()
 
-    var following []map[string]interface{}
+    following := []map[string]interface{}{}
     for rows.Next() {
         var user models.User
         var status string

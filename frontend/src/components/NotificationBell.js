@@ -30,6 +30,12 @@ export default function NotificationBell() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(false);
   const dropdownRef = useRef(null);
+  // Tracks which notification IDs we've already counted, so a duplicate
+  // live push (the GET-on-mount fetch can already include a row that then
+  // also arrives over the socket) doesn't inflate unreadCount - it's a
+  // separately-tracked counter, not derived from `notifications`, so
+  // deduping the list alone wouldn't keep it in sync.
+  const seenNotificationIdsRef = useRef(new Set());
 
   useEffect(() => {
     fetchUnreadCount();
@@ -47,6 +53,9 @@ export default function NotificationBell() {
 
   useEffect(() => {
     return subscribe("notification", (notification) => {
+      if (seenNotificationIdsRef.current.has(notification.id)) return;
+      seenNotificationIdsRef.current.add(notification.id);
+
       setNotifications((prev) => [notification, ...prev]);
       setUnreadCount((prev) => prev + 1);
       toast.success(notification.content);
@@ -69,7 +78,9 @@ export default function NotificationBell() {
     try {
       const { ok, data } = await apiFetch("/notifications");
       if (ok) {
-        setNotifications(data || []);
+        const list = data || [];
+        list.forEach((n) => seenNotificationIdsRef.current.add(n.id));
+        setNotifications(list);
       }
     } catch (error) {
       console.error("Error fetching notifications:", error);
