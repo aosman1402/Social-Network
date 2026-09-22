@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import { useWebSocket } from "@/context/WebSocketContext";
@@ -37,6 +37,23 @@ export default function ProfileDetailPage() {
   const [followers, setFollowers] = useState([]);
   const [following, setFollowing] = useState([]);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
+  const redirectTimeoutRef = useRef(null);
+
+  // Clears the pending redirect if the page unmounts (e.g. the user
+  // navigates away manually) - otherwise the stale timer would still fire
+  // later and yank them back to Home from wherever they'd gone instead.
+  useEffect(() => {
+    return () => clearTimeout(redirectTimeoutRef.current);
+  }, []);
+
+  // Redirects Home 5s after a follow/follow-request action - the toast
+  // already shown by the caller covers the "what happened" message.
+  const scheduleHomeRedirect = () => {
+    clearTimeout(redirectTimeoutRef.current);
+    redirectTimeoutRef.current = setTimeout(() => {
+      router.push("/");
+    }, 5000);
+  };
 
   // A notification can deep-link here with a different ?tab= while this
   // page is already mounted (e.g. still on your own profile when a follow
@@ -61,6 +78,16 @@ export default function ProfileDetailPage() {
       if (notification.type === "follow_request") {
         setPendingRequestsCount((prev) => prev + 1);
       }
+    });
+  }, [isOwnProfile, subscribe]);
+
+  // Mirror the drop when a still-pending request gets cancelled, for the
+  // same reason as above - FollowRequests can only correct the count
+  // itself while the Requests tab is the one open.
+  useEffect(() => {
+    if (!isOwnProfile) return;
+    return subscribe("follow_request_cancelled", () => {
+      setPendingRequestsCount((prev) => Math.max(0, prev - 1));
     });
   }, [isOwnProfile, subscribe]);
 
@@ -254,6 +281,7 @@ export default function ProfileDetailPage() {
           // it as a follower yet.
           setProfile({ ...profile, is_pending: true });
           toast.success(data.message || "Follow request sent");
+          scheduleHomeRedirect();
         } else {
           setProfile({
             ...profile,
@@ -262,6 +290,7 @@ export default function ProfileDetailPage() {
           });
           setFollowers([...followers, { user: currentUser }]);
           toast.success(data.message || "Followed");
+          scheduleHomeRedirect();
         }
       } else {
         toast.error(data.error || "Failed to update follow status");
@@ -302,11 +331,17 @@ export default function ProfileDetailPage() {
 
       if (ok) {
         setProfile({ ...profile, is_public: newIsPublic });
-        toast.success(
-          newIsPublic
-            ? "Your profile is now public"
-            : "Your profile is now private",
-        );
+        // Both directions now earn a self-targeted live notification from
+        // the backend - NotificationBell already toasts that, so showing
+        // one here too would duplicate it.
+
+        // A privacy flip changes what's visible throughout the page
+        // (followers/following eligibility, post visibility, etc.) - a
+        // full reload is the simplest way to make sure everything reflects
+        // it consistently, rather than patching every derived bit of state
+        // by hand. Delayed briefly so the toast from the live notification
+        // above has a moment to actually appear first.
+        setTimeout(() => window.location.reload(), 600);
       } else {
         toast.error(data.error || "Failed to update privacy");
       }
@@ -378,7 +413,7 @@ export default function ProfileDetailPage() {
                 ? "bg-yellow-100 text-yellow-800 hover:bg-red-100 hover:text-red-700"
                 : "bg-blue-500 text-white hover:bg-blue-600"
             }`}>
-            {profile.is_pending ? "Pending · Cancel" : "Follow Request"}
+            {profile.is_pending ? "Cancel Request" : "Follow Request"}
           </button>
           <button
             onClick={() => router.push("/")}
@@ -503,7 +538,7 @@ export default function ProfileDetailPage() {
                   {profile.is_following
                     ? "Following"
                     : profile.is_pending
-                      ? "Pending · Cancel"
+                      ? "Cancel Request"
                       : "Follow"}
                 </button>
               )}

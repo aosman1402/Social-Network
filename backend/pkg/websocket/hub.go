@@ -141,8 +141,16 @@ func (h *Hub) IsUserOnline(userID int64) bool {
 // h may be nil (contexts, e.g. tests, that don't wire a hub up) - safe to
 // call unconditionally either way.
 func (h *Hub) NotifyUser(userID int64, notification map[string]interface{}) {
+    h.NotifyUserEvent(userID, "notification", notification)
+}
+
+// NotifyUserEvent is NotifyUser generalised to an arbitrary event type, for
+// live updates that aren't themselves a new notification row - e.g. a
+// cancelled follow request, which needs to update/remove something the
+// client already has rather than being appended as a new list entry.
+func (h *Hub) NotifyUserEvent(userID int64, eventType string, data interface{}) {
     if h == nil {
         return
     }
-    broadcastEvent(h, "user_"+strconv.FormatInt(userID, 10), "notification", notification)
+    broadcastEvent(h, "user_"+strconv.FormatInt(userID, 10), eventType, data)
 }

@@ -252,6 +252,8 @@ func (uh *UserHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
     if !wasPublic && updates.IsPublic {
         uh.autoAcceptPendingFollowsOnGoingPublic(userID)
+    } else if wasPublic && !updates.IsPublic {
+        uh.notifyProfileNowPrivate(userID)
     }
 
     json.NewEncoder(w).Encode(map[string]string{
@@ -359,6 +361,33 @@ func (uh *UserHandler) notifyProfileNowPublic(userID int64, approvedCount int) {
         "id":         notificationID,
         "user_id":    userID,
         "type":       "profile_public",
+        "content":    content,
+        "is_read":    false,
+        "created_at": createdAt,
+    })
+}
+
+// notifyProfileNowPrivate tells userID their profile switched to private -
+// the reverse of notifyProfileNowPublic. There's no auto-accept side effect
+// to report going this direction (a public account has no pending follows
+// to begin with), so it's just the plain confirmation.
+func (uh *UserHandler) notifyProfileNowPrivate(userID int64) {
+    content := "Your profile is now private."
+
+    createdAt := time.Now()
+    result, err := uh.DB.Exec(
+        `INSERT INTO notifications (user_id, type, content, created_at)
+         VALUES (?, 'profile_private', ?, ?)`,
+        userID, content, createdAt,
+    )
+    if err != nil {
+        return
+    }
+    notificationID, _ := result.LastInsertId()
+    uh.Hub.NotifyUser(userID, map[string]interface{}{
+        "id":         notificationID,
+        "user_id":    userID,
+        "type":       "profile_private",
         "content":    content,
         "is_read":    false,
         "created_at": createdAt,

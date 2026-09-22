@@ -90,7 +90,7 @@ export default function FollowButton({
         className='px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg hover:bg-red-100 hover:text-red-700 transition'>
         <span className='flex items-center space-x-2'>
           <span>⏳</span>
-          <span>{loading ? "Cancelling..." : "Pending · Cancel"}</span>
+          <span>{loading ? "Cancelling..." : "Cancel Request"}</span>
         </span>
       </button>
     );

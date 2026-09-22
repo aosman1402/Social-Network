@@ -38,6 +38,19 @@ export default function NotificationsPage() {
     });
   }, [subscribe]);
 
+  // A cancelled follow request stays in the list (there's still a record
+  // it happened) but is no longer actionable - flag it so it renders
+  // struck through instead of being removed.
+  useEffect(() => {
+    return subscribe("follow_request_cancelled", ({ notification_id }) => {
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n.id === notification_id ? { ...n, is_cancelled: true } : n,
+        ),
+      );
+    });
+  }, [subscribe]);
+
   const fetchNotifications = async () => {
     try {
       const { ok, data } = await apiFetch("/notifications");
@@ -137,7 +150,12 @@ export default function NotificationsPage() {
                     {getNotificationIcon(notification.type)}
                   </div>
                   <div className='flex-1'>
-                    <p className={!notification.is_read ? "font-semibold" : ""}>
+                    <p
+                      className={`${!notification.is_read ? "font-semibold" : ""} ${
+                        notification.is_cancelled
+                          ? "line-through text-gray-400"
+                          : ""
+                      }`}>
                       {notification.content}
                     </p>
                     <p className='text-sm text-gray-400 mt-1'>

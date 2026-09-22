@@ -11,6 +11,8 @@ export const getNotificationIcon = (type) => {
     case "follow_accepted":
     case "new_follower":
       return "👤";
+    case "follow_declined":
+      return "🙅";
     case "unfollow":
       return "👋";
     case "group_invitation":
@@ -25,6 +27,8 @@ export const getNotificationIcon = (type) => {
       return "💬";
     case "profile_public":
       return "🌍";
+    case "profile_private":
+      return "🔒";
     default:
       return "🔔";
   }
@@ -47,6 +51,7 @@ export const getNotificationTarget = (notification, currentUserId) => {
       // Requests tab to accept/decline, not on the sender's profile.
       return `/profile/${currentUserId}?tab=requests`;
     case "follow_accepted":
+    case "follow_declined":
     case "new_follower":
     case "unfollow":
       return `/profile/${relatedId}`;
@@ -60,6 +65,7 @@ export const getNotificationTarget = (notification, currentUserId) => {
     case "comment":
       return `/?post=${postId}&comment=${relatedId}`;
     case "profile_public":
+    case "profile_private":
       return `/profile/${currentUserId}`;
     default:
       return "/notifications";

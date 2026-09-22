@@ -48,9 +48,10 @@ type Notification struct {
     Type      string    `json:"type"`
     Content   string    `json:"content"`
     IsRead    bool      `json:"is_read"`
-    RelatedID *int64    `json:"related_id,omitempty"`
-    PostID    *int64    `json:"post_id,omitempty"`
-    CreatedAt time.Time `json:"created_at"`
+    RelatedID   *int64    `json:"related_id,omitempty"`
+    PostID      *int64    `json:"post_id,omitempty"`
+    IsCancelled bool      `json:"is_cancelled"`
+    CreatedAt   time.Time `json:"created_at"`
 }
 
 // HandleWebSocket - Handle WebSocket connections

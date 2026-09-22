@@ -30,6 +30,15 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
     });
   }, [subscribe]);
 
+  // A sender cancelling their still-pending request no longer belongs in
+  // this list - refetch so it disappears (and the "Requests (N)" count
+  // drops via onCountChange below) without needing a page reload.
+  useEffect(() => {
+    return subscribe("follow_request_cancelled", () => {
+      fetchRequests();
+    });
+  }, [subscribe]);
+
   // Report the current pending count up to the parent whenever it changes
   // (initial load, and after each accept/decline) so a tab label showing
   // "Requests (N)" elsewhere stays in sync without a page reload.

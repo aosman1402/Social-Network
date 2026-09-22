@@ -173,6 +173,28 @@ func (uh *UserHandler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    if previousStatus == "pending" {
+        // The original "X requested to follow you" notification stays in
+        // the recipient's list rather than being deleted outright (there's
+        // still a record it happened), but it's flagged cancelled so the
+        // UI can show it struck through instead of offering accept/decline
+        // actions that no longer apply.
+        var notificationID int64
+        err := uh.DB.QueryRow(
+            `SELECT id FROM notifications
+             WHERE user_id = ? AND type = 'follow_request' AND related_id = ? AND is_cancelled = 0
+             ORDER BY created_at DESC LIMIT 1`,
+            req.UserID, followerID,
+        ).Scan(&notificationID)
+        if err == nil {
+            uh.DB.Exec("UPDATE notifications SET is_cancelled = 1 WHERE id = ?", notificationID)
+            uh.Hub.NotifyUserEvent(req.UserID, "follow_request_cancelled", map[string]interface{}{
+                "notification_id": notificationID,
+                "follower_id":     followerID,
+            })
+        }
+    }
+
     if previousStatus == "accepted" {
         var followerName string
         uh.DB.QueryRow(
@@ -251,32 +273,36 @@ func (uh *UserHandler) HandleFollowRequest(w http.ResponseWriter, r *http.Reques
         return
     }
 
-    if req.Action == "accept" {
-        var userName string
-        uh.DB.QueryRow(
-            "SELECT first_name || ' ' || last_name FROM users WHERE id = ?",
-            userID,
-        ).Scan(&userName)
+    var userName string
+    uh.DB.QueryRow(
+        "SELECT first_name || ' ' || last_name FROM users WHERE id = ?",
+        userID,
+    ).Scan(&userName)
 
-        content := userName + " accepted your follow request"
-        createdAt := time.Now()
-        result, err := uh.DB.Exec(
-            `INSERT INTO notifications (user_id, type, content, related_id, created_at)
-             VALUES (?, 'follow_accepted', ?, ?, ?)`,
-            req.FollowerID, content, userID, createdAt,
-        )
-        if err == nil {
-            notificationID, _ := result.LastInsertId()
-            uh.Hub.NotifyUser(req.FollowerID, map[string]interface{}{
-                "id":         notificationID,
-                "user_id":    req.FollowerID,
-                "type":       "follow_accepted",
-                "content":    content,
-                "is_read":    false,
-                "related_id": userID,
-                "created_at": createdAt,
-            })
-        }
+    notifType := "follow_accepted"
+    content := userName + " accepted your follow request"
+    if req.Action == "decline" {
+        notifType = "follow_declined"
+        content = userName + " declined your follow request"
+    }
+
+    createdAt := time.Now()
+    result, err := uh.DB.Exec(
+        `INSERT INTO notifications (user_id, type, content, related_id, created_at)
+         VALUES (?, ?, ?, ?, ?)`,
+        req.FollowerID, notifType, content, userID, createdAt,
+    )
+    if err == nil {
+        notificationID, _ := result.LastInsertId()
+        uh.Hub.NotifyUser(req.FollowerID, map[string]interface{}{
+            "id":         notificationID,
+            "user_id":    req.FollowerID,
+            "type":       notifType,
+            "content":    content,
+            "is_read":    false,
+            "related_id": userID,
+            "created_at": createdAt,
+        })
     }
 
     json.NewEncoder(w).Encode(map[string]string{
