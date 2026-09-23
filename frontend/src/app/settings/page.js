@@ -6,6 +6,7 @@ import { useAuth } from "@/context/AuthContext";
 import SettingsProfileTab from "@/components/SettingsProfileTab";
 import SettingsPasswordTab from "@/components/SettingsPasswordTab";
 import SettingsNotificationsTab from "@/components/SettingsNotificationsTab";
+import SettingsEducationTab from "@/components/SettingsEducationTab";
 
 export default function SettingsPage() {
   const router = useRouter();
@@ -60,6 +61,15 @@ export default function SettingsPage() {
               }`}>
               Notifications
             </button>
+            <button
+              onClick={() => setActiveTab("education")}
+              className={`w-full text-left px-3 py-2 rounded-lg transition ${
+                activeTab === "education"
+                  ? "bg-blue-50 text-blue-600"
+                  : "hover:bg-gray-50 text-gray-700"
+              }`}>
+              Education
+            </button>
           </div>
 
           {/* Content */}
@@ -96,6 +106,15 @@ export default function SettingsPage() {
 
             {activeTab === "notifications" && (
               <SettingsNotificationsTab
+                isLoading={isLoading}
+                setIsLoading={setIsLoading}
+                setMessage={setMessage}
+              />
+            )}
+
+            {activeTab === "education" && (
+              <SettingsEducationTab
+                user={user}
                 isLoading={isLoading}
                 setIsLoading={setIsLoading}
                 setMessage={setMessage}

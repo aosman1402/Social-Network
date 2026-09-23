@@ -20,6 +20,10 @@ export default function ChatDetailPage() {
   const [loading, setLoading] = useState(true);
   const [otherUser, setOtherUser] = useState(null);
   const [sending, setSending] = useState(false);
+  // Set when the backend confirms these two users aren't allowed to message
+  // each other (no follow relationship in either direction) - blocks the
+  // compose UI instead of silently showing an empty conversation.
+  const [blocked, setBlocked] = useState(false);
   const messagesEndRef = useRef(null);
 
   // Load the other user's profile and this conversation's history.
@@ -37,9 +41,18 @@ export default function ChatDetailPage() {
           return;
         }
 
-        const { ok: msgOk, data: msgData } = await apiFetch(
-          `/messages/history?user_id=${userId}`,
-        );
+        const {
+          ok: msgOk,
+          status: msgStatus,
+          data: msgData,
+        } = await apiFetch(`/messages/history?user_id=${userId}`);
+
+        if (!msgOk && msgStatus === 403) {
+          setBlocked(true);
+          setMessages([]);
+          return;
+        }
+
         setMessages(msgOk && Array.isArray(msgData) ? msgData : []);
       } catch (error) {
         console.error("Error fetching chat:", error);
@@ -64,6 +77,19 @@ export default function ChatDetailPage() {
         return;
       }
       setMessages((prev) => [...prev, msg]);
+    });
+  }, [subscribe, userId]);
+
+  // A WebSocket "chat" send is optimistic on the frontend (see sendMessage
+  // below) - if the server rejects it (e.g. no follow relationship), the
+  // sender otherwise never finds out and the message stays shown as if it
+  // went through. Roll back the optimistic entry and surface why.
+  useEffect(() => {
+    const otherUserId = parseInt(userId);
+    return subscribe("chat_error", (err) => {
+      if (err.recipient_id !== otherUserId) return;
+      setMessages((prev) => prev.filter((m) => !m.pending));
+      toast.error(err.error || "Failed to send message");
     });
   }, [subscribe, userId]);
 
@@ -102,6 +128,11 @@ export default function ChatDetailPage() {
       content,
       created_at: new Date().toISOString(),
       sender: { first_name: "You", last_name: "" },
+      // Cleared once the send is confirmed - a chat_error event for this
+      // recipient removes any message still flagged pending (see the
+      // chat_error subscription above), since the WS send below doesn't
+      // wait for a server response before showing "sent".
+      pending: true,
     };
 
     // Try WebSocket first
@@ -157,6 +188,37 @@ export default function ChatDetailPage() {
           className='mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600'>
           Back to Chats
         </button>
+      </div>
+    );
+  }
+
+  // Neither user follows the other - direct messages require a follow
+  // relationship in either direction, so there's no conversation to show.
+  if (blocked) {
+    return (
+      <div className='max-w-md mx-auto py-12 px-4 text-center'>
+        <div className='w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center text-white text-xl font-bold mx-auto'>
+          {otherUser?.first_name?.[0] || "U"}
+        </div>
+        <h2 className='text-xl font-bold mt-4'>
+          {otherUser?.first_name} {otherUser?.last_name}
+        </h2>
+        <p className='text-gray-600 mt-3'>
+          🔒 You can't message {otherUser?.first_name} yet. You can only send
+          direct messages to people who follow you or that you follow.
+        </p>
+        <div className='mt-4 flex justify-center gap-2'>
+          <button
+            onClick={() => router.push(`/profile/${userId}`)}
+            className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition'>
+            View Profile
+          </button>
+          <button
+            onClick={() => router.push("/chat")}
+            className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
+            Back to Chats
+          </button>
+        </div>
       </div>
     );
   }

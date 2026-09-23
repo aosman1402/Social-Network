@@ -15,7 +15,12 @@ const AVATAR_BACKGROUND_COLORS = [
   "00e676",
 ];
 const AVATAR_SEEDS = ["Nova", "Comet", "Lumen", "Aster", "Orbit", "Quartz"];
-const DICEBEAR_AVATARS = AVATAR_SEEDS.map((seed, i) => ({
+// Exported so other places that let a user pick one of these presets (e.g.
+// the Settings "Change Avatar" option) reuse the exact same six instead of
+// redefining the seed/color list - the backend validates against this same
+// set too (see presetAvatarSeeds/presetAvatarColors in user.go), so drift
+// here would make a legitimately-picked avatar fail server-side.
+export const DICEBEAR_AVATARS = AVATAR_SEEDS.map((seed, i) => ({
   seed,
   url: `https://api.dicebear.com/10.x/clay/svg?seed=${seed}&backgroundColor=${AVATAR_BACKGROUND_COLORS[i]}`,
 }));

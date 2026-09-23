@@ -6,10 +6,12 @@ import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { useWebSocket } from "@/context/WebSocketContext";
 
 export default function ChatPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useRequireAuth();
+  const { subscribe } = useWebSocket();
   const [chats, setChats] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -30,6 +32,34 @@ export default function ChatPage() {
 
     fetchChats();
   }, [user]);
+
+  // Previously this list only ever loaded once on mount - a message
+  // arriving while it was open didn't move that conversation to the top,
+  // update its preview/unread badge, or add a brand-new conversation row,
+  // so nothing on this page ever visibly changed in real time.
+  useEffect(() => {
+    if (!user) return;
+
+    return subscribe("chat", (msg) => {
+      const otherUserId = msg.sender_id === user.id ? msg.recipient_id : msg.sender_id;
+      const isIncoming = msg.sender_id !== user.id;
+
+      setChats((prev) => {
+        const existing = prev.find((c) => c.other_user_id === otherUserId);
+        const updated = {
+          other_user_id: otherUserId,
+          other_user: existing?.other_user || msg.sender,
+          last_message: msg.content,
+          last_message_at: msg.created_at,
+          unread_count: isIncoming
+            ? (existing?.unread_count || 0) + 1
+            : existing?.unread_count || 0,
+        };
+        const rest = prev.filter((c) => c.other_user_id !== otherUserId);
+        return [updated, ...rest];
+      });
+    });
+  }, [subscribe, user]);
 
   if (authLoading || loading) {
     return (

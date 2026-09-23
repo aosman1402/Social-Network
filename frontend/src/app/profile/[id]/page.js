@@ -526,21 +526,33 @@ export default function ProfileDetailPage() {
                   </button>
                 </>
               ) : (
-                <button
-                  onClick={handleFollowToggle}
-                  className={`px-4 py-2 rounded-lg font-medium transition ${
-                    profile.is_following
-                      ? "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                <>
+                  <button
+                    onClick={handleFollowToggle}
+                    className={`px-4 py-2 rounded-lg font-medium transition ${
+                      profile.is_following
+                        ? "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        : profile.is_pending
+                          ? "bg-yellow-100 text-yellow-800 hover:bg-red-100 hover:text-red-700"
+                          : "bg-blue-500 text-white hover:bg-blue-600"
+                    }`}>
+                    {profile.is_following
+                      ? "Following"
                       : profile.is_pending
-                        ? "bg-yellow-100 text-yellow-800 hover:bg-red-100 hover:text-red-700"
-                        : "bg-blue-500 text-white hover:bg-blue-600"
-                  }`}>
-                  {profile.is_following
-                    ? "Following"
-                    : profile.is_pending
-                      ? "Cancel Request"
-                      : "Follow"}
-                </button>
+                        ? "Cancel Request"
+                        : "Follow"}
+                  </button>
+                  <button
+                    onClick={() => router.push(`/chat/${userId}`)}
+                    title={
+                      profile.is_following
+                        ? "Send a message"
+                        : "Direct messages require a follow relationship - you'll see why if this is blocked"
+                    }
+                    className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
+                    Message
+                  </button>
+                </>
               )}
             </div>
           </div>

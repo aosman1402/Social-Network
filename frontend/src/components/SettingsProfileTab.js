@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { toast } from "@/context/ToastContext";
 import { getAvatarSrc } from "@/utils/helpers";
 import { apiFetch } from "@/lib/api";
+import { DICEBEAR_AVATARS } from "@/components/AvatarPicker";
 
 // The "Profile" tab of the Settings page: avatar, name, bio, and the
 // public/private toggle. Loads the signed-in user's real profile on mount
@@ -24,9 +25,23 @@ export default function SettingsProfileTab({
   });
   const [profileLoaded, setProfileLoaded] = useState(false);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [showAvatarPresets, setShowAvatarPresets] = useState(false);
+  const [applyingPreset, setApplyingPreset] = useState(false);
+  const avatarPresetsRef = useRef(null);
   // The last-saved value, so a confirmation only fires when isPublic is
   // actually being changed by this submit, not on every unrelated save.
   const [savedIsPublic, setSavedIsPublic] = useState(true);
+
+  useEffect(() => {
+    if (!showAvatarPresets) return;
+    const handleClickOutside = (event) => {
+      if (avatarPresetsRef.current && !avatarPresetsRef.current.contains(event.target)) {
+        setShowAvatarPresets(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [showAvatarPresets]);
 
   useEffect(() => {
     if (!user) return;
@@ -96,6 +111,35 @@ export default function SettingsProfileTab({
     } finally {
       setUploadingAvatar(false);
       e.target.value = "";
+    }
+  };
+
+  const handleSelectAvatarPreset = async (avatarUrl) => {
+    if (avatarUrl === user?.avatar_path) {
+      setShowAvatarPresets(false);
+      return;
+    }
+
+    setApplyingPreset(true);
+    try {
+      const { ok, data } = await apiFetch("/user/avatar-preset", {
+        method: "PUT",
+        json: { avatar_path: avatarUrl },
+      });
+
+      if (!ok) {
+        toast.error(data.error || "Failed to update avatar");
+        return;
+      }
+
+      setUser((prev) => (prev ? { ...prev, avatar_path: data.avatar_path } : prev));
+      toast.success("Avatar updated!");
+      setShowAvatarPresets(false);
+    } catch (error) {
+      console.error("Error applying avatar preset:", error);
+      toast.error("Failed to update avatar");
+    } finally {
+      setApplyingPreset(false);
     }
   };
 
@@ -188,6 +232,35 @@ export default function SettingsProfileTab({
             disabled={uploadingAvatar}
           />
         </label>
+
+        <div className='avatar-preset-wrapper' ref={avatarPresetsRef}>
+          <button
+            type='button'
+            onClick={() => setShowAvatarPresets((open) => !open)}
+            disabled={applyingPreset}
+            className='px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition disabled:opacity-50'>
+            {applyingPreset ? "Saving..." : "Change Avatar"}
+          </button>
+
+          {showAvatarPresets && (
+            <div className='avatar-preset-panel'>
+              <p className='avatar-preset-title'>Choose an avatar</p>
+              <div className='grid grid-cols-3 gap-2'>
+                {DICEBEAR_AVATARS.map((avatar) => (
+                  <img
+                    key={avatar.seed}
+                    src={avatar.url}
+                    alt={`Avatar option: ${avatar.seed}`}
+                    onClick={() => handleSelectAvatarPreset(avatar.url)}
+                    className={`w-12 h-12 rounded-full cursor-pointer border-4 ${
+                      user?.avatar_path === avatar.url ? "border-blue-500" : "border-white"
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
       <div className='grid grid-cols-1 md:grid-cols-2 gap-4'>

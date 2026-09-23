@@ -487,6 +487,340 @@ input, textarea, select {
 }
 
 /* ============================================================
+   Settings - avatar preset picker
+   ============================================================ */
+
+.avatar-preset-wrapper {
+  position: relative;
+}
+
+.avatar-preset-panel {
+  position: absolute;
+  top: calc(100% + 0.5rem);
+  left: 0;
+  width: 13rem;
+  padding: 0.75rem;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  z-index: 30;
+}
+
+.avatar-preset-title {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+/* ============================================================
+   Settings - notification preference tooltips
+   ============================================================ */
+
+.settings-notif-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.info-tooltip {
+  position: relative;
+  display: inline-flex;
+  color: var(--text-muted);
+  cursor: help;
+}
+
+.info-tooltip:hover,
+.info-tooltip:focus {
+  color: var(--primary);
+  outline: none;
+}
+
+.info-tooltip-bubble {
+  position: absolute;
+  bottom: calc(100% + 0.4rem);
+  left: 50%;
+  transform: translateX(-50%) translateY(0.25rem);
+  width: 15rem;
+  padding: 0.5rem 0.65rem;
+  background: var(--text-primary);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.4;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 120ms ease, transform 120ms ease;
+  pointer-events: none;
+  z-index: 20;
+}
+
+.info-tooltip-bubble::after {
+  content: "";
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 5px solid transparent;
+  border-top-color: var(--text-primary);
+}
+
+.info-tooltip:hover .info-tooltip-bubble,
+.info-tooltip:focus .info-tooltip-bubble {
+  opacity: 1;
+  visibility: visible;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* ============================================================
+   Navbar
+   ============================================================ */
+
+.navbar {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-light);
+  box-shadow: var(--shadow-sm);
+}
+
+.navbar-inner {
+  max-width: 80rem;
+  margin: 0 auto;
+  padding: 0 1rem;
+  height: var(--navbar-height);
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+}
+
+.navbar-brand {
+  flex-shrink: 0;
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--primary);
+  white-space: nowrap;
+}
+
+.navbar-brand:hover {
+  color: var(--primary-dark);
+  text-decoration: none;
+}
+
+.navbar-loading {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 0.875rem;
+}
+
+.navbar-login {
+  margin-left: auto;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.navbar-login:hover {
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.navbar-toggle {
+  display: none;
+  margin-left: auto;
+  padding: 0.375rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+}
+
+.navbar-toggle:hover {
+  background: var(--background);
+  color: var(--primary);
+}
+
+.navbar-links {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.navbar-link {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-full);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.navbar-link:hover {
+  background: var(--background);
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.navbar-link--active {
+  background: var(--primary-light);
+  color: var(--primary);
+}
+
+.navbar-link--active:hover {
+  background: var(--primary-light);
+}
+
+.navbar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.navbar-menu {
+  position: relative;
+}
+
+.navbar-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.3rem 0.6rem 0.3rem 0.3rem;
+  background: none;
+  border: none;
+  border-radius: var(--radius-full);
+  color: var(--text-primary);
+}
+
+.navbar-menu-trigger:hover {
+  background: var(--background);
+}
+
+.navbar-menu-name {
+  font-size: 0.875rem;
+  font-weight: 500;
+  max-width: 8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navbar-menu-panel {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.5rem);
+  width: 15rem;
+  background: var(--surface);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-xl);
+  overflow: hidden;
+  z-index: 50;
+}
+
+.navbar-menu-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-bottom: 1px solid var(--border-light);
+}
+
+.navbar-menu-header-text {
+  min-width: 0;
+}
+
+.navbar-menu-fullname {
+  margin: 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navbar-menu-email {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.navbar-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.6rem 1rem;
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  text-align: left;
+}
+
+.navbar-menu-item:hover {
+  background: var(--background);
+  color: var(--primary);
+  text-decoration: none;
+}
+
+.navbar-menu-item--danger {
+  color: var(--error);
+  border-top: 1px solid var(--border-light);
+  margin-top: 0.25rem;
+}
+
+.navbar-menu-item--danger:hover {
+  background: #fef2f2;
+  color: var(--error);
+}
+
+@media (max-width: 767px) {
+  .navbar-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .navbar-menu-name {
+    display: none;
+  }
+
+  .navbar-links {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    right: 0;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.15rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border-light);
+    box-shadow: var(--shadow-lg);
+    padding: 0.5rem;
+    display: none;
+  }
+
+  .navbar-links--open {
+    display: flex;
+  }
+
+  .navbar-link {
+    border-radius: var(--radius-md);
+  }
+}
+
+/* ============================================================
    Groups page
    ============================================================ */
 
