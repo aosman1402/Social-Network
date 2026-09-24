@@ -362,6 +362,7 @@ input, textarea, select {
 .text-right { text-align: right; }
 .whitespace-pre-wrap { white-space: pre-wrap; }
 .break-all { word-break: break-all; }
+.break-words { overflow-wrap: anywhere; }
 
 /* Overflow / object-fit */
 .overflow-y-auto { overflow-y: auto; }
@@ -573,6 +574,60 @@ input, textarea, select {
   opacity: 1;
   visibility: visible;
   transform: translateX(-50%) translateY(0);
+}
+
+/* ============================================================
+   Post privacy - badge on posts and picker in the post form
+   ============================================================ */
+
+.privacy-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: var(--text-secondary);
+}
+
+.privacy-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.privacy-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.25rem 0.65rem;
+  border: 1px solid var(--border);
+  border-radius: 9999px;
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease;
+}
+
+.privacy-option:hover {
+  border-color: var(--primary);
+}
+
+.privacy-option input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.privacy-option:focus-within {
+  outline: 2px solid var(--primary);
+  outline-offset: 1px;
+}
+
+.privacy-option--selected {
+  border-color: var(--primary);
+  background: var(--primary-light);
+  color: var(--primary-dark);
+  font-weight: 500;
 }
 
 /* ============================================================

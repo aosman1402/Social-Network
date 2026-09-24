@@ -6,6 +6,7 @@ import PostForm from "@/components/PostForm";
 import PostCard from "@/components/PostCard";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { useLivePosts } from "@/hooks/useLivePosts";
 import { apiFetch } from "@/lib/api";
 
 export default function HomePage() {
@@ -34,6 +35,9 @@ function HomeFeed() {
   const targetCommentId = searchParams.get("comment");
   const [highlightedPostId, setHighlightedPostId] = useState(null);
   const handledTargetRef = useRef(null);
+
+  // The feed shows every post the viewer can see, so any new one belongs.
+  useLivePosts(setPosts);
 
   const fetchPosts = async () => {
     try {
@@ -127,7 +131,6 @@ function HomeFeed() {
             <PostCard
               key={post.id}
               post={post}
-              onUpdate={fetchPosts}
               onDelete={handlePostDeleted}
               highlighted={highlightedPostId === post.id}
               autoOpenComments={

@@ -4,8 +4,10 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import { useWebSocket } from "@/context/WebSocketContext";
+import { useLivePosts } from "@/hooks/useLivePosts";
 import FollowRequests from "@/components/FollowRequests";
 import Avatar from "@/components/Avatar";
+import PrivacyBadge from "@/components/PrivacyBadge";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
@@ -38,6 +40,13 @@ export default function ProfileDetailPage() {
   const [following, setFollowing] = useState([]);
   const [pendingRequestsCount, setPendingRequestsCount] = useState(0);
   const redirectTimeoutRef = useRef(null);
+
+  // Only this user's own posts belong here, and only once their profile
+  // has actually loaded as viewable (not the private-account card).
+  useLivePosts(setUserPosts, {
+    accept: (post) => post.user_id === parseInt(userId),
+    enabled: !!profile && !profile.private,
+  });
 
   // Clears the pending redirect if the page unmounts (e.g. the user
   // navigates away manually) - otherwise the stale timer would still fire
@@ -648,9 +657,11 @@ export default function ProfileDetailPage() {
                   <div
                     key={post.id}
                     className='bg-gray-50 rounded-lg p-4 border'>
-                    <p className='text-gray-800 whitespace-pre-wrap'>
-                      {post.content}
-                    </p>
+                    {post.content?.trim() && (
+                      <p className='text-gray-800 whitespace-pre-wrap break-words'>
+                        {post.content}
+                      </p>
+                    )}
 
                     {post.image_path && (
                       <img
@@ -664,18 +675,13 @@ export default function ProfileDetailPage() {
                       <p className='text-xs text-gray-400'>
                         {formatPostTime(post.created_at)}
                       </p>
-                      {post.privacy_level && (
-                        <span className='text-xs bg-gray-200 px-2 py-0.5 rounded'>
-                          {post.privacy_level === "public"
-                            ? "🌍"
-                            : post.privacy_level === "almost_private"
-                              ? "👥"
-                              : "🔒"}
-                        </span>
-                      )}
+                      <PrivacyBadge post={post} className='bg-gray-200' />
                     </div>
 
                     <div className='flex items-center gap-4 mt-2 pt-2 border-t'>
+                      <span className='text-sm text-gray-500'>
+                        ❤️ {post.like_count || 0} likes
+                      </span>
                       <span className='text-sm text-gray-500'>
                         💬 {post.comment_count || 0} comments
                       </span>

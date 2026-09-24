@@ -44,6 +44,7 @@ func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
         }
         var likeCount int
         ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
+        ph.broadcastLike(postID, userID, false, likeCount)
 
         // ✅ Return JSON response
         json.NewEncoder(w).Encode(map[string]interface{}{
@@ -94,11 +95,24 @@ func (ph *PostHandler) LikePost(w http.ResponseWriter, r *http.Request) {
 
     var likeCount int
     ph.DB.QueryRow("SELECT COUNT(*) FROM post_likes WHERE post_id = ?", postID).Scan(&likeCount)
+    ph.broadcastLike(postID, userID, true, likeCount)
 
     // ✅ Return JSON response
     json.NewEncoder(w).Encode(map[string]interface{}{
         "message":    "Post liked",
         "liked":      true,
+        "like_count": likeCount,
+    })
+}
+
+// broadcastLike tells every viewer of postID its new like count. user_id
+// and liked let the liker's own other tabs flip their heart too - everyone
+// else only uses like_count.
+func (ph *PostHandler) broadcastLike(postID, userID int64, liked bool, likeCount int) {
+    broadcastToPostViewers(ph.DB, ph.Hub, postID, "post_liked", map[string]interface{}{
+        "post_id":    postID,
+        "user_id":    userID,
+        "liked":      liked,
         "like_count": likeCount,
     })
 }

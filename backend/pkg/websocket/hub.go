@@ -154,3 +154,24 @@ func (h *Hub) NotifyUserEvent(userID int64, eventType string, data interface{}) 
     }
     broadcastEvent(h, "user_"+strconv.FormatInt(userID, 10), eventType, data)
 }
+// OnlineUserIDs returns the id of every user with at least one open
+// connection, each listed once however many tabs they have open. Used to
+// fan out live feed updates (new posts, comments, likes) to exactly the
+// connected users allowed to see them, rather than to everyone.
+func (h *Hub) OnlineUserIDs() []int64 {
+    if h == nil {
+        return nil
+    }
+    h.mutex.RLock()
+    defer h.mutex.RUnlock()
+
+    seen := make(map[int64]bool)
+    var ids []int64
+    for client := range h.Clients {
+        if !seen[client.UserID] {
+            seen[client.UserID] = true
+            ids = append(ids, client.UserID)
+        }
+    }
+    return ids
+}

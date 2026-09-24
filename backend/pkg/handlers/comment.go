@@ -25,8 +25,8 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
     content := r.FormValue("content")
     postIDStr := r.FormValue("post_id")
 
-    if content == "" {
-        writeJSONError(w, http.StatusBadRequest, "Content is required")
+    if msg := contentError(content, hasImageUpload(r)); msg != "" {
+        writeJSONError(w, http.StatusBadRequest, msg)
         return
     }
 
@@ -129,6 +129,14 @@ func (ph *PostHandler) CreateComment(w http.ResponseWriter, r *http.Request) {
             })
         }
     }
+
+    var commentCount int
+    ph.DB.QueryRow("SELECT COUNT(*) FROM comments WHERE post_id = ?", postID).Scan(&commentCount)
+    broadcastToPostViewers(ph.DB, ph.Hub, postID, "comment_created", map[string]interface{}{
+        "post_id":       postID,
+        "comment":       comment,
+        "comment_count": commentCount,
+    })
 
     w.Header().Set("Content-Type", "application/json")
     json.NewEncoder(w).Encode(map[string]interface{}{

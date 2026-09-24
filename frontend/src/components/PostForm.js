@@ -4,6 +4,8 @@ import { useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
+import { PRIVACY_OPTIONS } from "@/lib/privacy";
+import InfoTooltip from "@/components/InfoTooltip";
 
 export default function PostForm({ onPostCreated, groupId = null }) {
   const { user } = useAuth();
@@ -79,8 +81,10 @@ export default function PostForm({ onPostCreated, groupId = null }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
 
-    if (!content.trim()) {
-      toast.error("Please write something");
+    // A post needs text, an image, or both - any language, symbols and
+    // emoji are fine as typed.
+    if (!content.trim() && !image) {
+      toast.error("Write something or add an image (JPG, PNG or GIF)");
       return;
     }
 
@@ -175,6 +179,31 @@ export default function PostForm({ onPostCreated, groupId = null }) {
             </div>
           )}
 
+          {/* Privacy Selector - not shown for group posts, whose
+              visibility is governed by group membership instead. Each
+              option carries an "i" explaining exactly who will see it. */}
+          {!groupId && (
+            <div className='privacy-picker' role='radiogroup' aria-label='Post privacy'>
+              {PRIVACY_OPTIONS.map((option) => (
+                <label
+                  key={option.value}
+                  className={`privacy-option${privacy === option.value ? " privacy-option--selected" : ""}`}>
+                  <input
+                    type='radio'
+                    name='privacy'
+                    value={option.value}
+                    checked={privacy === option.value}
+                    onChange={() => handlePrivacyChange(option.value)}
+                    disabled={loading}
+                  />
+                  <span aria-hidden='true'>{option.icon}</span>
+                  {option.label}
+                  <InfoTooltip text={option.info} />
+                </label>
+              ))}
+            </div>
+          )}
+
           <div className='flex items-center justify-between mt-2'>
             <div className='flex items-center space-x-2'>
               {/* Image Upload Button */}
@@ -190,26 +219,11 @@ export default function PostForm({ onPostCreated, groupId = null }) {
                 📷 <span className='text-sm'>Photo</span>
               </label>
 
-              {/* Privacy Selector - not shown for group posts, whose
-                  visibility is governed by group membership instead */}
-              {!groupId && (
-                <select
-                  id='post-privacy'
-                  name='privacy'
-                  value={privacy}
-                  onChange={(e) => handlePrivacyChange(e.target.value)}
-                  className='px-3 py-1 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm'
-                  disabled={loading}>
-                  <option value='public'>🌍 Public</option>
-                  <option value='almost_private'>👥 Almost Private</option>
-                  <option value='private'>🔒 Private</option>
-                </select>
-              )}
             </div>
 
             <button
               type='submit'
-              disabled={!content.trim() || loading}
+              disabled={(!content.trim() && !image) || loading}
               className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition disabled:opacity-50 disabled:cursor-not-allowed'>
               {loading ? "Posting..." : "Post"}
             </button>

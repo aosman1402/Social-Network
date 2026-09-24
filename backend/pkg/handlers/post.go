@@ -40,8 +40,8 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     log.Printf("Content: %s", content)
     log.Printf("Privacy: %s", privacyLevel)
 
-    if content == "" {
-        writeJSONError(w, http.StatusBadRequest, "Content is required")
+    if msg := contentError(content, hasImageUpload(r)); msg != "" {
+        writeJSONError(w, http.StatusBadRequest, msg)
         return
     }
 
@@ -164,6 +164,15 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
         "is_saved":         false,
     }
 
+    // Everyone else gets the post without allowed_user_ids - who the
+    // author picked as viewers of a private post is the author's business.
+    livePost := make(map[string]interface{}, len(post))
+    for k, v := range post {
+        livePost[k] = v
+    }
+    delete(livePost, "allowed_user_ids")
+    broadcastToPostViewers(ph.DB, ph.Hub, postID, "post_created", livePost)
+
     w.Header().Set("Content-Type", "application/json")
     w.WriteHeader(http.StatusCreated)
     json.NewEncoder(w).Encode(map[string]interface{}{
@@ -284,11 +293,15 @@ func (ph *PostHandler) DeletePost(w http.ResponseWriter, r *http.Request) {
         deleteUploadedImage(imagePath.String)
     }
 
+    viewers := onlinePostViewers(ph.DB, ph.Hub, postID)
+
     _, err = ph.DB.Exec("DELETE FROM posts WHERE id = ?", postID)
     if err != nil {
         writeJSONError(w, http.StatusInternalServerError, "Failed to delete post")
         return
     }
+
+    sendToUsers(ph.Hub, viewers, "post_deleted", map[string]interface{}{"post_id": postID})
 
     json.NewEncoder(w).Encode(map[string]string{
         "message": "Post deleted successfully",
@@ -308,7 +321,8 @@ func (ph *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
 
     // Check if post exists and belongs to user
     var ownerID int64
-    err = ph.DB.QueryRow("SELECT user_id FROM posts WHERE id = ?", postID).Scan(&ownerID)
+    var existingImage sql.NullString
+    err = ph.DB.QueryRow("SELECT user_id, image_path FROM posts WHERE id = ?", postID).Scan(&ownerID, &existingImage)
     if err != nil {
         writeJSONError(w, http.StatusNotFound, "Post not found")
         return
@@ -329,8 +343,10 @@ func (ph *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
     content := r.FormValue("content")
     privacyLevel := r.FormValue("privacy_level")
 
-    if content == "" {
-        writeJSONError(w, http.StatusBadRequest, "Content is required")
+    // The post can drop its text as long as it keeps (or gets) an image.
+    hasImage := hasImageUpload(r) || (existingImage.Valid && existingImage.String != "")
+    if msg := contentError(content, hasImage); msg != "" {
+        writeJSONError(w, http.StatusBadRequest, msg)
         return
     }
 
@@ -351,10 +367,8 @@ func (ph *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
         }
 
         // Delete old image now that the new one is safely saved
-        var oldImagePath sql.NullString
-        ph.DB.QueryRow("SELECT image_path FROM posts WHERE id = ?", postID).Scan(&oldImagePath)
-        if oldImagePath.Valid {
-            deleteUploadedImage(oldImagePath.String)
+        if existingImage.Valid {
+            deleteUploadedImage(existingImage.String)
         }
     }
 

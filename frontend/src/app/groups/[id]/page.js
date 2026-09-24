@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { useLivePosts } from "@/hooks/useLivePosts";
 import PostForm from "@/components/PostForm";
 import PostCard from "@/components/PostCard";
 
@@ -21,6 +22,11 @@ export default function GroupDetailPage() {
   const [pendingRequests, setPendingRequests] = useState([]);
   const [posts, setPosts] = useState([]);
   const [postsLoading, setPostsLoading] = useState(false);
+
+  useLivePosts(setPosts, {
+    accept: (post) => String(post.group_id) === String(groupId),
+    enabled: !!group?.is_member,
+  });
 
   useEffect(() => {
     if (!user || !groupId) return;
@@ -238,7 +244,6 @@ export default function GroupDetailPage() {
                   <PostCard
                     key={post.id}
                     post={post}
-                    onUpdate={fetchGroupPosts}
                     onDelete={handlePostDeleted}
                   />
                 ))

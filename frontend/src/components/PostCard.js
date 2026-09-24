@@ -6,16 +6,18 @@ import { useAuth } from "@/context/AuthContext";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
+import { useWebSocket } from "@/context/WebSocketContext";
+import PrivacyBadge from "@/components/PrivacyBadge";
 
 export default function PostCard({
   post,
-  onUpdate,
   onDelete,
   highlighted = false,
   autoOpenComments = false,
   highlightCommentId = null,
 }) {
   const { user } = useAuth();
+  const { subscribe } = useWebSocket();
   const [showComments, setShowComments] = useState(autoOpenComments);
   const [comments, setComments] = useState([]);
   const [commentContent, setCommentContent] = useState("");
@@ -28,9 +30,32 @@ export default function PostCard({
   const [liked, setLiked] = useState(post.is_liked || false);
   const [likeCount, setLikeCount] = useState(post.like_count || 0);
 
+  // The parent list keeps like counts live (useLivePosts) - follow it.
+  useEffect(() => {
+    setLiked(post.is_liked || false);
+    setLikeCount(post.like_count || 0);
+  }, [post.is_liked, post.like_count]);
+
+  // Someone (maybe this user in another tab) commented on this post -
+  // show it right away in the open thread.
+  useEffect(() => {
+    return subscribe("comment_created", ({ post_id, comment }) => {
+      if (post_id === post.id) addComment(comment);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [post.id, subscribe]);
+
   const [saved, setSaved] = useState(post.is_saved || false);
   const [imageError, setImageError] = useState(false);
   const isOwnPost = user?.id === post.user_id;
+
+  // Comments are oldest-first; the same comment can arrive both from our
+  // own POST response and the live event, so skip ones already shown.
+  const addComment = (comment) => {
+    setComments((prev) =>
+      prev.some((c) => c.id === comment.id) ? prev : [...prev, comment],
+    );
+  };
 
   const fetchComments = async () => {
     setLoadingComments(true);
@@ -95,11 +120,10 @@ export default function PostCard({
       });
 
       if (ok) {
-        setComments([data.comment, ...comments]);
+        addComment(data.comment);
         setCommentContent("");
         removeCommentImage();
         toast.success("Comment added!");
-        if (onUpdate) onUpdate();
       } else {
         toast.error(data.error || "Failed to add comment");
       }
@@ -144,7 +168,6 @@ export default function PostCard({
 
       setLiked(data.liked);
       setLikeCount(data.like_count || 0);
-      if (onUpdate) onUpdate();
     } catch (error) {
       console.error("Error liking post:", error);
       toast.error("Failed to like post: " + error.message);
@@ -224,15 +247,7 @@ export default function PostCard({
             </p>
             <p className='text-sm text-gray-500'>
               {formatDate(post.created_at)}
-              {post.privacy_level && (
-                <span className='ml-2 text-xs bg-gray-100 px-2 py-0.5 rounded'>
-                  {post.privacy_level === "public"
-                    ? "🌍"
-                    : post.privacy_level === "almost_private"
-                      ? "👥"
-                      : "🔒"}
-                </span>
-              )}
+              <PrivacyBadge post={post} className='ml-2 bg-gray-100' />
             </p>
           </div>
         </div>
@@ -246,7 +261,9 @@ export default function PostCard({
       </div>
 
       {/* Post Content */}
-      <p className='mt-3 whitespace-pre-wrap'>{post.content}</p>
+      {post.content?.trim() && (
+        <p className='mt-3 whitespace-pre-wrap break-words'>{post.content}</p>
+      )}
 
       {/* Post Image */}
       {post.image_path && !imageError && (
@@ -277,7 +294,7 @@ export default function PostCard({
           onClick={toggleComments}
           className='flex items-center space-x-1 text-sm text-gray-500 hover:text-blue-500 transition'>
           <span>💬</span>
-          <span>{post.comment_count || comments.length || 0}</span>
+          <span>{Math.max(post.comment_count || 0, comments.length)}</span>
         </button>
 
         {/* Save Button */}
@@ -371,7 +388,11 @@ export default function PostCard({
                         {comment.user?.first_name} {comment.user?.last_name}
                       </Link>
                     </p>
-                    <p className='text-sm'>{comment.content}</p>
+                    {comment.content?.trim() && (
+                      <p className='text-sm whitespace-pre-wrap break-words'>
+                        {comment.content}
+                      </p>
+                    )}
                     {comment.image_path && (
                       <img
                         src={`http://localhost:8081${comment.image_path}`}
