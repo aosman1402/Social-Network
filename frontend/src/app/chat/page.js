@@ -41,6 +41,7 @@ export default function ChatPage() {
     if (!user) return;
 
     return subscribe("chat", (msg) => {
+      if (msg.group_id) return; // this list only holds direct conversations
       const otherUserId = msg.sender_id === user.id ? msg.recipient_id : msg.sender_id;
       const isIncoming = msg.sender_id !== user.id;
 

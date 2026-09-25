@@ -20,7 +20,11 @@ export const getNotificationIcon = (type) => {
     case "group_request":
       return "📩";
     case "group_request_accepted":
+    case "group_invitation_accepted":
       return "✅";
+    case "group_invitation_declined":
+    case "group_request_declined":
+      return "🙅";
     case "event_created":
       return "📅";
     case "comment":
@@ -58,6 +62,9 @@ export const getNotificationTarget = (notification, currentUserId) => {
     case "group_invitation":
     case "group_request":
     case "group_request_accepted":
+    case "group_invitation_accepted":
+    case "group_invitation_declined":
+    case "group_request_declined":
     case "event_created":
       return `/groups/${relatedId}`;
     case "like":

@@ -73,6 +73,7 @@ export default function ChatDetailPage() {
   useEffect(() => {
     const otherUserId = parseInt(userId);
     return subscribe("chat", (msg) => {
+      if (msg.group_id) return; // group chat, not this DM
       if (msg.sender_id !== otherUserId && msg.recipient_id !== otherUserId) {
         return;
       }

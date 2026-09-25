@@ -141,6 +141,29 @@ export default function GroupDetailPage() {
     }
   };
 
+  const handleInvitation = async (action) => {
+    try {
+      const { ok, data } = await apiFetch("/group/invitation", {
+        method: "POST",
+        json: { group_id: parseInt(groupId), action },
+      });
+
+      if (ok) {
+        toast.success(data.message || `Invitation ${action}d`);
+        if (action === "accept") {
+          window.location.reload();
+        } else {
+          router.push("/groups");
+        }
+      } else {
+        toast.error(data.error || "Failed to respond to invitation");
+      }
+    } catch (err) {
+      console.error("Error responding to invitation:", err);
+      toast.error("Failed to respond to invitation");
+    }
+  };
+
   if (authLoading || loading) {
     return (
       <div className='group-loading'>
@@ -214,9 +237,21 @@ export default function GroupDetailPage() {
               </span>
             )}
             {group.is_invited && (
-              <span className='group-status group-status--invited'>
-                Invited
-              </span>
+              <>
+                <span className='group-status group-status--invited'>
+                  You&apos;re invited
+                </span>
+                <button
+                  onClick={() => handleInvitation("accept")}
+                  className='group-accept-btn'>
+                  Accept
+                </button>
+                <button
+                  onClick={() => handleInvitation("decline")}
+                  className='group-decline-btn'>
+                  Decline
+                </button>
+              </>
             )}
             {isMember && (
               <button onClick={handleLeaveGroup} className='group-leave-btn'>

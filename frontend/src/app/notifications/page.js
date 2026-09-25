@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
@@ -13,7 +13,7 @@ import { getNotificationIcon, getNotificationTarget } from "@/utils/helpers";
 export default function NotificationsPage() {
   const router = useRouter();
   const { user, loading: authLoading } = useAuth();
-  const { subscribe } = useWebSocket();
+  const { subscribe, isConnected } = useWebSocket();
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -50,6 +50,26 @@ export default function NotificationsPage() {
       );
     });
   }, [subscribe]);
+
+  // Keep read state in sync with the navbar bell, other tabs, and reads
+  // the server does itself (e.g. answering a group invitation).
+  useEffect(() => {
+    return subscribe("notifications_read", ({ notification_ids, all }) => {
+      const ids = new Set(notification_ids || []);
+      setNotifications((prev) =>
+        prev.map((n) => (all || ids.has(n.id) ? { ...n, is_read: true } : n)),
+      );
+    });
+  }, [subscribe]);
+
+  // Reload after a reconnect - anything sent while the socket was down
+  // never arrived live.
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (!isConnected) return;
+    if (wasConnectedRef.current && user) fetchNotifications();
+    wasConnectedRef.current = true;
+  }, [isConnected]);
 
   const fetchNotifications = async () => {
     try {

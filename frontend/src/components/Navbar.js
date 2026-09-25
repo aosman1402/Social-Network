@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { toast } from "@/context/ToastContext";
+import { apiFetch } from "@/lib/api";
 import NotificationBell from "@/components/NotificationBell";
 import Avatar from "@/components/Avatar";
 
@@ -103,11 +104,12 @@ function getNavLinks(userId) {
 
 export default function Navbar() {
   const { user, loading, logout } = useAuth();
-  const { subscribe } = useWebSocket();
+  const { subscribe, isConnected } = useWebSocket();
   const pathname = usePathname();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [chatUnread, setChatUnread] = useState(0);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -142,6 +144,48 @@ export default function Navbar() {
       toast.success(`${name}: ${msg.content}`);
     });
   }, [subscribe, user, pathname]);
+
+  // Chat (N) badge: total unread private messages. Loaded from the server
+  // on login and on every socket (re)connect, so messages that arrived
+  // while offline are counted too.
+  useEffect(() => {
+    if (!user || !isConnected) return;
+    let cancelled = false;
+    apiFetch("/messages/unread-count")
+      .then(({ ok, data }) => {
+        if (!cancelled && ok) setChatUnread(data.unread_count || 0);
+      })
+      .catch((error) => console.error("Error fetching unread messages:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [user, isConnected]);
+
+  // Bump the badge live for an incoming message - unless that conversation
+  // is open right now, where it's read immediately (its read receipt would
+  // just bring the count straight back down).
+  useEffect(() => {
+    if (!user) return;
+    return subscribe("chat", (msg) => {
+      if (msg.sender_id === user.id || !msg.recipient_id) return;
+      if (pathname === `/chat/${msg.sender_id}`) return;
+      setChatUnread((n) => n + 1);
+    });
+  }, [subscribe, user, pathname]);
+
+  // Messages were read (in this tab or another one) - resync from the
+  // server rather than decrementing, so the count can't drift.
+  useEffect(() => {
+    if (!user) return;
+    return subscribe("messages_read", async () => {
+      try {
+        const { ok, data } = await apiFetch("/messages/unread-count");
+        if (ok) setChatUnread(data.unread_count || 0);
+      } catch (error) {
+        console.error("Error fetching unread messages:", error);
+      }
+    });
+  }, [subscribe, user]);
 
   const handleLogout = async () => {
     const result = await logout();
@@ -191,6 +235,13 @@ export default function Navbar() {
                   className={`navbar-link ${isActive(pathname) ? "navbar-link--active" : ""}`}>
                   <Icon size={18} />
                   <span>{label}</span>
+                  {href === "/chat" && chatUnread > 0 && (
+                    <span
+                      className='navbar-link-badge'
+                      aria-label={`${chatUnread} unread messages`}>
+                      {chatUnread > 99 ? "99+" : chatUnread}
+                    </span>
+                  )}
                 </Link>
               ))}
             </div>

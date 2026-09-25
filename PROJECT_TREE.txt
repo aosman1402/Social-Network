@@ -33,26 +33,45 @@
 │   │   │   │       ├── 000014_create_post_allowed_users.down.sql
 │   │   │   │       ├── 000014_create_post_allowed_users.up.sql
 │   │   │   │       ├── 000015_add_post_id_to_notifications.down.sql
-│   │   │   │       └── 000015_add_post_id_to_notifications.up.sql
+│   │   │   │       ├── 000015_add_post_id_to_notifications.up.sql
+│   │   │   │       ├── 000016_add_is_cancelled_to_notifications.down.sql
+│   │   │   │       ├── 000016_add_is_cancelled_to_notifications.up.sql
+│   │   │   │       ├── 000017_add_education_fields_to_users.down.sql
+│   │   │   │       ├── 000017_add_education_fields_to_users.up.sql
+│   │   │   │       ├── 000018_add_invited_by_to_group_members.down.sql
+│   │   │   │       ├── 000018_add_invited_by_to_group_members.up.sql
+│   │   │   │       ├── 000019_add_actor_id_to_notifications.down.sql
+│   │   │   │       └── 000019_add_actor_id_to_notifications.up.sql
 │   │   │   └── sqlite
 │   │   │       ├── social-network.db
 │   │   │       └── sqlite.go
 │   │   ├── handlers
+│   │   │   ├── uploads
+│   │   │   ├── auth_checkauth_test.go
+│   │   │   ├── auth_checknickname_test.go
 │   │   │   ├── auth_integration_test.go
 │   │   │   ├── auth_validation_test.go
 │   │   │   ├── auth_validation.go
 │   │   │   ├── auth.go
+│   │   │   ├── chat_realtime_test.go
+│   │   │   ├── chat_unread_test.go
 │   │   │   ├── chat.go
 │   │   │   ├── comment.go
 │   │   │   ├── follow_integration_test.go
 │   │   │   ├── follow.go
 │   │   │   ├── group_events.go
+│   │   │   ├── group_invitation_test.go
 │   │   │   ├── group_membership.go
 │   │   │   ├── group.go
+│   │   │   ├── notifications_sync_test.go
 │   │   │   ├── notifications.go
 │   │   │   ├── pagination_test.go
 │   │   │   ├── pagination.go
+│   │   │   ├── post_content_test.go
+│   │   │   ├── post_content.go
 │   │   │   ├── post_integration_test.go
+│   │   │   ├── post_live_test.go
+│   │   │   ├── post_live.go
 │   │   │   ├── post_reactions.go
 │   │   │   ├── post_response.go
 │   │   │   ├── post.go
@@ -60,10 +79,15 @@
 │   │   │   ├── testutil_test.go
 │   │   │   ├── upload.go
 │   │   │   ├── user.go
-│   │   │   └── websocket.go
+│   │   │   ├── websocket_test.go
+│   │   │   ├── websocket.go
+│   │   │   └── ws_isolation_test.go
 │   │   ├── middleware
+│   │   │   ├── auth_test.go
 │   │   │   ├── auth.go
+│   │   │   ├── cors_test.go
 │   │   │   ├── cors.go
+│   │   │   ├── ratelimit_test.go
 │   │   │   └── ratelimit.go
 │   │   ├── models
 │   │   │   ├── group.go
@@ -84,6 +108,7 @@
 │   ├── Dockerfile
 │   ├── go.mod
 │   ├── go.sum
+│   ├── package-lock.json
 │   └── server.go
 ├── frontend
 │   ├── .swc
@@ -121,12 +146,16 @@
 │   │   │   ├── AvatarPicker.js
 │   │   │   ├── FollowButton.js
 │   │   │   ├── FollowRequests.js
+│   │   │   ├── InfoTooltip.js
 │   │   │   ├── LoadingSpinner.js
+│   │   │   ├── Navbar.js
 │   │   │   ├── NicknameField.js
 │   │   │   ├── NotificationBell.js
 │   │   │   ├── PasswordRequirements.js
 │   │   │   ├── PostCard.js
 │   │   │   ├── PostForm.js
+│   │   │   ├── PrivacyBadge.js
+│   │   │   ├── SettingsEducationTab.js
 │   │   │   ├── SettingsNotificationsTab.js
 │   │   │   ├── SettingsPasswordTab.js
 │   │   │   └── SettingsProfileTab.js
@@ -135,10 +164,12 @@
 │   │   │   ├── ToastContext.js
 │   │   │   └── WebSocketContext.js
 │   │   ├── hooks
+│   │   │   ├── useLivePosts.js
 │   │   │   └── useRequireAuth.js
 │   │   ├── lib
 │   │   │   ├── api.js
-│   │   │   └── formatDistanceToNow.js
+│   │   │   ├── formatDistanceToNow.js
+│   │   │   └── privacy.js
 │   │   └── utils
 │   │       ├── fingerprint.js
 │   │       ├── helpers.js
@@ -156,7 +187,8 @@
 ├── AUDIT.md
 ├── CLAUDE.md
 ├── docker-compose.yml
+├── package-lock.json
 ├── PROJECT_TREE.txt
 └── README.md
 
-34 directories, 126 files
+35 directories, 157 files

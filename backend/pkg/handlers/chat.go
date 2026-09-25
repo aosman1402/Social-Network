@@ -26,6 +26,19 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
                 CASE WHEN sender_id = ? THEN recipient_id ELSE sender_id END as other_user_id
             FROM messages
             WHERE sender_id = ? OR recipient_id = ?
+         ),
+         -- Only list conversations that can still be opened: direct
+         -- messages need a follow relationship in either direction (see
+         -- websocket.CanDirectMessage), so after an unfollow the chat
+         -- would otherwise stay listed but only lead to a blocked page.
+         reachable AS (
+            SELECT other_user_id FROM conversations c
+            WHERE EXISTS (
+                SELECT 1 FROM follows f
+                WHERE f.status = 'accepted'
+                  AND ((f.follower_id = ? AND f.following_id = c.other_user_id)
+                    OR (f.follower_id = c.other_user_id AND f.following_id = ?))
+            )
          )
          SELECT
             c.other_user_id,
@@ -39,10 +52,10 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
              ORDER BY created_at DESC LIMIT 1) as last_message_at,
             (SELECT COUNT(*) FROM messages
              WHERE sender_id = c.other_user_id AND recipient_id = ? AND read_at IS NULL) as unread_count
-         FROM conversations c
+         FROM reachable c
          ORDER BY last_message_at DESC
          LIMIT ? OFFSET ?`,
-		userID, userID, userID, userID, userID, userID, userID, userID, limit, offset,
+		userID, userID, userID, userID, userID, userID, userID, userID, userID, userID, limit, offset,
 	)
 	if err != nil {
 		writeJSONError(w, http.StatusInternalServerError, "Failed to get chats")
@@ -83,6 +96,35 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	json.NewEncoder(w).Encode(chats)
+}
+
+// GetUnreadMessageCount - Total unread private messages for the navbar's
+// Chat badge (the per-conversation breakdown is GetChats' unread_count).
+func (wsh *WebSocketHandler) GetUnreadMessageCount(w http.ResponseWriter, r *http.Request) {
+	userID, _ := middleware.GetUserID(r)
+
+	var count int
+	// Same reachability rule as GetChats, so the badge never counts
+	// messages in a conversation the chat list no longer shows.
+	err := wsh.DB.QueryRow(
+		`SELECT COUNT(*) FROM messages m
+         WHERE m.recipient_id = ? AND m.read_at IS NULL
+           AND EXISTS (
+               SELECT 1 FROM follows f
+               WHERE f.status = 'accepted'
+                 AND ((f.follower_id = m.recipient_id AND f.following_id = m.sender_id)
+                   OR (f.follower_id = m.sender_id AND f.following_id = m.recipient_id))
+           )`,
+		userID,
+	).Scan(&count)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "Failed to get unread count")
+		return
+	}
+
+	json.NewEncoder(w).Encode(map[string]int{
+		"unread_count": count,
+	})
 }
 
 // GetChatHistory - Get chat history between two users

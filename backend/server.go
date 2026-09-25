@@ -163,6 +163,7 @@ func main() {
 	http.HandleFunc("/api/chats", cors(authMiddleware.Authenticate(wsHandler.GetChats)))
 	http.HandleFunc("/api/messages/history", cors(authMiddleware.Authenticate(wsHandler.GetChatHistory)))
 	http.HandleFunc("/api/messages/send", cors(authMiddleware.Authenticate(wsHandler.SendMessage)))
+	http.HandleFunc("/api/messages/unread-count", cors(authMiddleware.Authenticate(wsHandler.GetUnreadMessageCount)))
 
 	// Notification routes
 	http.HandleFunc("/api/notifications", cors(authMiddleware.Authenticate(wsHandler.GetNotifications)))

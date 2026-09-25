@@ -1,11 +1,13 @@
 package handlers
 
 import (
+    "database/sql"
     "encoding/json"
     "log"
     "net/http"
 
     "social-network/pkg/middleware"
+    "social-network/pkg/websocket"
 )
 
 // GetNotifications - Get user notifications
@@ -60,13 +62,16 @@ func (wsh *WebSocketHandler) MarkNotificationAsRead(w http.ResponseWriter, r *ht
         return
     }
 
-    _, err := wsh.DB.Exec(
-        "UPDATE notifications SET is_read = true WHERE id = ? AND user_id = ?",
+    result, err := wsh.DB.Exec(
+        "UPDATE notifications SET is_read = true WHERE id = ? AND user_id = ? AND is_read = false",
         req.NotificationID, userID,
     )
     if err != nil {
         writeJSONError(w, http.StatusInternalServerError, "Failed to mark notification as read")
         return
+    }
+    if n, _ := result.RowsAffected(); n > 0 {
+        notifyNotificationsRead(wsh.Hub, userID, []int64{req.NotificationID}, false)
     }
 
     json.NewEncoder(w).Encode(map[string]string{
@@ -78,18 +83,68 @@ func (wsh *WebSocketHandler) MarkNotificationAsRead(w http.ResponseWriter, r *ht
 func (wsh *WebSocketHandler) MarkAllNotificationsAsRead(w http.ResponseWriter, r *http.Request) {
     userID, _ := middleware.GetUserID(r)
 
-    _, err := wsh.DB.Exec(
-        "UPDATE notifications SET is_read = true WHERE user_id = ?",
+    result, err := wsh.DB.Exec(
+        "UPDATE notifications SET is_read = true WHERE user_id = ? AND is_read = false",
         userID,
     )
     if err != nil {
         writeJSONError(w, http.StatusInternalServerError, "Failed to mark notifications as read")
         return
     }
+    if n, _ := result.RowsAffected(); n > 0 {
+        notifyNotificationsRead(wsh.Hub, userID, nil, true)
+    }
 
     json.NewEncoder(w).Encode(map[string]string{
         "message": "All notifications marked as read",
     })
+}
+
+// notifyNotificationsRead tells every open tab of userID that some of their
+// notifications were marked read - either the listed ids, or all of them -
+// so the navbar bell and the notifications page stay in sync no matter
+// where the read happened (the other of the two, another tab, or the
+// server itself, e.g. answering a group invitation).
+func notifyNotificationsRead(hub *websocket.Hub, userID int64, ids []int64, all bool) {
+    if ids == nil {
+        ids = []int64{}
+    }
+    hub.NotifyUserEvent(userID, "notifications_read", map[string]interface{}{
+        "notification_ids": ids,
+        "all":              all,
+    })
+}
+
+// markNotificationsRead marks userID's unread notifications matching the
+// extra WHERE clause (e.g. "type = 'group_request' AND related_id = ?")
+// as read, and pushes notifications_read for exactly those ids. Used where
+// the server itself resolves a notification - answering an invitation or
+// a join request - so the bell doesn't keep counting it.
+func markNotificationsRead(db *sql.DB, hub *websocket.Hub, userID int64, where string, args ...interface{}) {
+    queryArgs := append([]interface{}{userID}, args...)
+    rows, err := db.Query(
+        "SELECT id FROM notifications WHERE user_id = ? AND is_read = 0 AND "+where,
+        queryArgs...,
+    )
+    if err != nil {
+        log.Printf("markNotificationsRead: query failed: %v", err)
+        return
+    }
+    var ids []int64
+    for rows.Next() {
+        var id int64
+        if rows.Scan(&id) == nil {
+            ids = append(ids, id)
+        }
+    }
+    rows.Close()
+
+    for _, id := range ids {
+        db.Exec("UPDATE notifications SET is_read = 1 WHERE id = ?", id)
+    }
+    if len(ids) > 0 {
+        notifyNotificationsRead(hub, userID, ids, false)
+    }
 }
 
 // GetUnreadCount - Get unread notification count

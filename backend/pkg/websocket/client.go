@@ -97,9 +97,8 @@ func (c *Client) ReadPump(db *sql.DB) {
 
 		// Parse message
 		var wsMsg struct {
-			Type   string          `json:"type"`
-			Data   json.RawMessage `json:"data"`
-			RoomID string          `json:"room_id"`
+			Type string          `json:"type"`
+			Data json.RawMessage `json:"data"`
 		}
 
 		if err := json.Unmarshal(message, &wsMsg); err != nil {
@@ -156,14 +155,7 @@ func (c *Client) ReadPump(db *sql.DB) {
 				continue
 			}
 
-			// Broadcast typing status
-			if typingData.RecipientID != 0 {
-				roomID := "user_" + strconv.FormatInt(typingData.RecipientID, 10)
-				c.Hub.BroadcastToRoom(roomID, message)
-			} else if typingData.GroupID != 0 {
-				roomID := "group_" + strconv.FormatInt(typingData.GroupID, 10)
-				c.Hub.BroadcastToRoom(roomID, message)
-			}
+			go relayTyping(db, c.Hub, c.UserID, typingData.RecipientID, typingData.GroupID, typingData.IsTyping)
 
 		case "read_receipt":
 			var readData struct {
@@ -174,39 +166,7 @@ func (c *Client) ReadPump(db *sql.DB) {
 				continue
 			}
 
-			go updateMessageReadStatus(db, readData.MessageID, c.UserID)
-
-		case "join_room":
-			if wsMsg.RoomID != "" {
-				c.Hub.mutex.Lock()
-				if c.RoomID != "" {
-					if roomClients, ok := c.Hub.Rooms[c.RoomID]; ok {
-						delete(roomClients, c)
-						if len(roomClients) == 0 {
-							delete(c.Hub.Rooms, c.RoomID)
-						}
-					}
-				}
-				if c.Hub.Rooms[wsMsg.RoomID] == nil {
-					c.Hub.Rooms[wsMsg.RoomID] = make(map[*Client]bool)
-				}
-				c.Hub.Rooms[wsMsg.RoomID][c] = true
-				c.RoomID = wsMsg.RoomID
-				c.Hub.mutex.Unlock()
-			}
-
-		case "leave_room":
-			if wsMsg.RoomID != "" && c.RoomID == wsMsg.RoomID {
-				c.Hub.mutex.Lock()
-				if roomClients, ok := c.Hub.Rooms[c.RoomID]; ok {
-					delete(roomClients, c)
-					if len(roomClients) == 0 {
-						delete(c.Hub.Rooms, c.RoomID)
-					}
-				}
-				c.RoomID = ""
-				c.Hub.mutex.Unlock()
-			}
+			go updateMessageReadStatus(db, c.Hub, readData.MessageID, c.UserID)
 
 		case "ping":
 			pongMsg := map[string]string{"type": "pong"}
@@ -217,14 +177,7 @@ func (c *Client) ReadPump(db *sql.DB) {
 }
 
 func handleGroupMessage(db *sql.DB, senderID, groupID int64, content string, hub *Hub) {
-	// Check if user is a member
-	var count int
-	db.QueryRow(
-		"SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
-		groupID, senderID,
-	).Scan(&count)
-
-	if count == 0 {
+	if !isActiveGroupMember(db, groupID, senderID) {
 		return
 	}
 
@@ -265,20 +218,84 @@ func handleGroupMessage(db *sql.DB, senderID, groupID int64, content string, hub
 		"created_at": time.Now(),
 		"sender":     sender,
 	}
-	data, _ := json.Marshal(msg)
-
-	wsMsg := map[string]interface{}{
-		"type":    "chat",
-		"data":    json.RawMessage(data),
-		"room_id": "group_" + strconv.FormatInt(groupID, 10),
+	for _, memberID := range activeGroupMemberIDs(db, groupID) {
+		broadcastEvent(hub, "user_"+strconv.FormatInt(memberID, 10), "chat", msg)
 	}
-	msgBytes, _ := json.Marshal(wsMsg)
-
-	// Broadcast to all group members
-	hub.BroadcastToRoom("group_"+strconv.FormatInt(groupID, 10), msgBytes)
 }
 
-func updateMessageReadStatus(db *sql.DB, messageID int64, userID int64) {
+// isActiveGroupMember reports whether userID is an active member of groupID.
+func isActiveGroupMember(db *sql.DB, groupID, userID int64) bool {
+	var count int
+	db.QueryRow(
+		"SELECT COUNT(*) FROM group_members WHERE group_id = ? AND user_id = ? AND status = 'active'",
+		groupID, userID,
+	).Scan(&count)
+	return count > 0
+}
+
+// activeGroupMemberIDs lists groupID's active members. Group events are
+// delivered to each member's own user_<id> channel rather than a shared
+// "group_<id>" room: clients used to be able to join any room by name
+// (a "join_room" message with no membership check), which let anyone read
+// another user's DMs or a group's chat live.
+func activeGroupMemberIDs(db *sql.DB, groupID int64) []int64 {
+	rows, err := db.Query(
+		"SELECT user_id FROM group_members WHERE group_id = ? AND status = 'active'",
+		groupID,
+	)
+	if err != nil {
+		log.Printf("Failed to list members of group %d: %v", groupID, err)
+		return nil
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if rows.Scan(&id) == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids
+}
+
+// relayTyping forwards a typing indicator only where a message could be
+// sent too - to a user the sender may DM (CanDirectMessage), or to the
+// other members of a group the sender belongs to. It sends a fixed payload
+// rather than echoing the client's raw frame, which previously let any
+// user push arbitrary data to anyone's browser.
+func relayTyping(db *sql.DB, hub *Hub, senderID, recipientID, groupID int64, isTyping bool) {
+	if recipientID != 0 {
+		if recipientID == senderID {
+			return
+		}
+		allowed, err := CanDirectMessage(db, senderID, recipientID)
+		if err != nil || !allowed {
+			return
+		}
+		broadcastEvent(hub, "user_"+strconv.FormatInt(recipientID, 10), "typing", map[string]interface{}{
+			"sender_id":    senderID,
+			"recipient_id": recipientID,
+			"is_typing":    isTyping,
+		})
+		return
+	}
+
+	if groupID != 0 && isActiveGroupMember(db, groupID, senderID) {
+		for _, memberID := range activeGroupMemberIDs(db, groupID) {
+			if memberID == senderID {
+				continue
+			}
+			broadcastEvent(hub, "user_"+strconv.FormatInt(memberID, 10), "typing", map[string]interface{}{
+				"sender_id": senderID,
+				"group_id":  groupID,
+				"is_typing": isTyping,
+			})
+		}
+	}
+}
+
+func updateMessageReadStatus(db *sql.DB, hub *Hub, messageID int64, userID int64) {
 	var recipientID sql.NullInt64
 	err := db.QueryRow(
 		"SELECT recipient_id FROM messages WHERE id = ?",
@@ -295,12 +312,22 @@ func updateMessageReadStatus(db *sql.DB, messageID int64, userID int64) {
 		return
 	}
 
-	if _, err := db.Exec(
+	result, err := db.Exec(
 		"UPDATE messages SET read_at = ? WHERE id = ? AND read_at IS NULL",
 		time.Now(), messageID,
-	); err != nil {
+	)
+	if err != nil {
 		log.Printf("Failed to mark message %d as read: %v", messageID, err)
 		return
+	}
+
+	// Let every open tab of the reader refresh its Chat unread badge.
+	// Re-sent receipts for already-read messages change nothing and stay
+	// silent, so reopening an old conversation doesn't spam refetches.
+	if n, _ := result.RowsAffected(); n > 0 {
+		hub.NotifyUserEvent(userID, "messages_read", map[string]interface{}{
+			"message_id": messageID,
+		})
 	}
 
 	log.Printf("Message %d marked as read by user %d", messageID, userID)

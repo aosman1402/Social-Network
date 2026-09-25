@@ -24,7 +24,7 @@ function BellIcon({ size = 20 }) {
 export default function NotificationBell() {
   const router = useRouter();
   const { user } = useAuth();
-  const { subscribe } = useWebSocket();
+  const { subscribe, isConnected } = useWebSocket();
   const [unreadCount, setUnreadCount] = useState(0);
   const [showDropdown, setShowDropdown] = useState(false);
   const [notifications, setNotifications] = useState([]);
@@ -61,6 +61,33 @@ export default function NotificationBell() {
       toast.success(notification.content);
     });
   }, [subscribe]);
+
+  // Notifications were marked read somewhere else - the notifications
+  // page, another tab, or the server itself (e.g. answering a group
+  // invitation). Mirror it in the list and resync the count from the
+  // server rather than adjusting it locally, so it can't drift.
+  useEffect(() => {
+    return subscribe("notifications_read", ({ notification_ids, all }) => {
+      const ids = new Set(notification_ids || []);
+      setNotifications((prev) =>
+        prev.map((n) => (all || ids.has(n.id) ? { ...n, is_read: true } : n)),
+      );
+      fetchUnreadCount();
+    });
+  }, [subscribe]);
+
+  // Anything sent while the socket was down never arrived live - reload
+  // on every reconnect (not the first connect, which the mount fetch
+  // above already covers).
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (!isConnected) return;
+    if (wasConnectedRef.current) {
+      fetchUnreadCount();
+      fetchNotifications();
+    }
+    wasConnectedRef.current = true;
+  }, [isConnected]);
 
   // A cancelled follow request stays in the list (there's still a record
   // it happened) but is no longer actionable - flag it so it renders
