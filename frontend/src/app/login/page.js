@@ -1,9 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
+import GitHubLoginButton from "@/components/GitHubLoginButton";
+
+// Messages for the ?oauth_error= codes the backend's GitHub login sends
+// back here (backend/pkg/handlers/oauth_github.go).
+const OAUTH_ERRORS = {
+  denied: "GitHub login was cancelled.",
+  invalid_state: "That GitHub login link expired or was invalid - please try again.",
+  github_error: "GitHub didn't accept the login - please try again.",
+  no_verified_email: "Your GitHub account needs a verified email address to log in here.",
+  not_configured: "GitHub login isn't set up on this server.",
+  server_error: "Something went wrong logging in with GitHub - please try again.",
+};
 
 export default function LoginPage() {
   const router = useRouter();
@@ -12,6 +24,13 @@ export default function LoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // Read from window.location rather than useSearchParams(), which would
+  // need a Suspense boundary for this page to build.
+  useEffect(() => {
+    const code = new URLSearchParams(window.location.search).get("oauth_error");
+    if (code) setError(OAUTH_ERRORS[code] || OAUTH_ERRORS.server_error);
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -97,6 +116,11 @@ export default function LoginPage() {
             {isLoading ? "Logging in..." : "Login"}
           </button>
         </form>
+
+        <div className='auth-divider'>
+          <span>or</span>
+        </div>
+        <GitHubLoginButton />
 
         <p className='text-center mt-4 text-sm'>
           Don't have an account?{" "}

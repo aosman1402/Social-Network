@@ -6,8 +6,39 @@ import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import Avatar from "@/components/Avatar";
 import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
+import {
+  mergeMessages,
+  confirmPendingMessage,
+  dropPendingMessage,
+  insertAtCursor,
+  CHAT_EMOJIS,
+} from "@/utils/chat";
+
+// "Today" / "Yesterday" / "Mon 3 Mar 2026" - for the separators between days.
+const dayLabel = (date) => {
+  const d = new Date(date);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(today.getDate() - 1);
+  if (d.toDateString() === today.toDateString()) return "Today";
+  if (d.toDateString() === yesterday.toDateString()) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+};
+
+const clockTime = (date) =>
+  new Date(date).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+
+// How long "typing…" stays up without a fresh typing event, and how long
+// after our last keystroke we tell the other person we stopped.
+const TYPING_DISPLAY_MS = 4000;
+const TYPING_IDLE_MS = 2000;
+
+// Temporary ids for the sender's optimistic messages, unique per tab.
+let nextClientId = 1;
+const newClientId = () => `tmp-${Date.now()}-${nextClientId++}`;
 
 export default function ChatDetailPage() {
   const params = useParams();
@@ -24,10 +55,96 @@ export default function ChatDetailPage() {
   // each other (no follow relationship in either direction) - blocks the
   // compose UI instead of silently showing an empty conversation.
   const [blocked, setBlocked] = useState(false);
+  // Whether the OTHER person is online (null = unknown). Not our own
+  // connection - that's isConnected.
+  const [otherOnline, setOtherOnline] = useState(null);
   const messagesEndRef = useRef(null);
+  const [otherTyping, setOtherTyping] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const inputRef = useRef(null);
+  const pickerRef = useRef(null);
+  const typingSentRef = useRef(false);
+  const typingIdleTimerRef = useRef(null);
+  const otherTypingTimerRef = useRef(null);
+
+  // ---- Typing indicator (the server relays it only between people who
+  // may message each other) --------------------------------------------
+  const sendTyping = (isTyping) => {
+    if (typingSentRef.current === isTyping) return;
+    typingSentRef.current = isTyping;
+    send({ type: "typing", data: { recipient_id: parseInt(userId), is_typing: isTyping } });
+  };
+
+  useEffect(() => {
+    const otherUserId = parseInt(userId);
+    return subscribe("typing", (evt) => {
+      if (evt.group_id || evt.sender_id !== otherUserId) return;
+      clearTimeout(otherTypingTimerRef.current);
+      setOtherTyping(!!evt.is_typing);
+      if (evt.is_typing) {
+        // Clears itself if the "stopped" event never comes (closed tab).
+        otherTypingTimerRef.current = setTimeout(() => setOtherTyping(false), TYPING_DISPLAY_MS);
+      }
+    });
+  }, [subscribe, userId]);
+
+  // Their message arrived, so they've stopped typing; and tell them we
+  // stopped when we leave the conversation.
+  useEffect(() => {
+    const otherUserId = parseInt(userId);
+    const unsub = subscribe("chat", (msg) => {
+      if (msg.sender_id === otherUserId) setOtherTyping(false);
+    });
+    return () => {
+      unsub();
+      clearTimeout(typingIdleTimerRef.current);
+      clearTimeout(otherTypingTimerRef.current);
+      if (typingSentRef.current) {
+        send({ type: "typing", data: { recipient_id: otherUserId, is_typing: false } });
+        typingSentRef.current = false;
+      }
+    };
+  }, [subscribe, send, userId]);
+
+  const handleDraftChange = (value) => {
+    setNewMessage(value);
+    clearTimeout(typingIdleTimerRef.current);
+    if (value.trim()) {
+      sendTyping(true);
+      typingIdleTimerRef.current = setTimeout(() => sendTyping(false), TYPING_IDLE_MS);
+    } else {
+      sendTyping(false);
+    }
+  };
+
+  // ---- Emoji picker ------------------------------------------------------
+  useEffect(() => {
+    if (!pickerOpen) return;
+    const handleClick = (e) => {
+      if (pickerRef.current && !pickerRef.current.contains(e.target)) setPickerOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [pickerOpen]);
+
+  const insertEmoji = (emoji) => {
+    const input = inputRef.current;
+    const { value, cursor } = insertAtCursor(newMessage, emoji, input?.selectionStart, input?.selectionEnd);
+    handleDraftChange(value);
+    requestAnimationFrame(() => {
+      input?.focus();
+      input?.setSelectionRange(cursor, cursor);
+    });
+  };
 
   // Load the other user's profile and this conversation's history.
   useEffect(() => {
+    // Start empty for each conversation - the page is reused when moving
+    // between chats, and history is merged into (not swapped for) the list.
+    setMessages([]);
+    setBlocked(false);
+    setLoading(true);
+
     const fetchChat = async () => {
       try {
         const { ok: userOk, data: userData } = await apiFetch(
@@ -53,7 +170,12 @@ export default function ChatDetailPage() {
           return;
         }
 
-        setMessages(msgOk && Array.isArray(msgData) ? msgData : []);
+        // History arrives newest first; show it oldest -> newest, the same
+        // order live messages are added in. Merging also keeps any message
+        // that arrived live while the request was in flight.
+        setMessages((prev) =>
+          mergeMessages(prev, msgOk && Array.isArray(msgData) ? msgData : []),
+        );
       } catch (error) {
         console.error("Error fetching chat:", error);
         setMessages([]);
@@ -66,6 +188,47 @@ export default function ChatDetailPage() {
     fetchChat();
   }, [userId, router]);
 
+  // Catch up after a dropped connection - messages sent while we were
+  // offline never arrived live. Merged, so nothing already shown repeats.
+  const wasDisconnectedRef = useRef(false);
+  useEffect(() => {
+    if (!isConnected) {
+      wasDisconnectedRef.current = true;
+      return;
+    }
+    if (!wasDisconnectedRef.current) return;
+    wasDisconnectedRef.current = false;
+    apiFetch(`/messages/history?user_id=${userId}`)
+      .then(({ ok, data }) => {
+        if (ok && Array.isArray(data)) setMessages((prev) => mergeMessages(prev, data));
+      })
+      .catch((error) => console.error("Error catching up chat:", error));
+  }, [isConnected, userId]);
+
+  // The other person's online status: read it whenever our own connection
+  // is (re)established - a change while we were offline was never pushed to
+  // us - then keep it current from live "presence" events.
+  useEffect(() => {
+    setOtherOnline(null);
+    if (!isConnected || blocked) return;
+    let cancelled = false;
+    apiFetch(`/user/presence?id=${userId}`)
+      .then(({ ok, data }) => {
+        if (!cancelled) setOtherOnline(ok ? !!data.online : null);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [isConnected, blocked, userId]);
+
+  useEffect(() => {
+    const otherUserId = parseInt(userId);
+    return subscribe("presence", (p) => {
+      if (p.user_id === otherUserId) setOtherOnline(!!p.online);
+    });
+  }, [subscribe, userId]);
+
   // Live-append incoming messages that belong to this conversation. The
   // shared socket delivers every "chat" event addressed to this user, not
   // just ones from the person currently open here, so it has to be
@@ -77,19 +240,35 @@ export default function ChatDetailPage() {
       if (msg.sender_id !== otherUserId && msg.recipient_id !== otherUserId) {
         return;
       }
-      setMessages((prev) => [...prev, msg]);
+      // Deduped by server id, so a message can never be shown twice.
+      setMessages((prev) => mergeMessages(prev, [msg]));
+    });
+  }, [subscribe, userId]);
+
+  // The server confirmed one of our WebSocket sends: swap the optimistic
+  // copy's temporary id for the real one, so a later history reload or a
+  // repeated event can't produce a second copy.
+  useEffect(() => {
+    const otherUserId = parseInt(userId);
+    return subscribe("ack", (ack) => {
+      if (ack.recipient_id !== otherUserId || !ack.client_id) return;
+      setMessages((prev) => confirmPendingMessage(prev, ack.client_id, ack));
     });
   }, [subscribe, userId]);
 
   // A WebSocket "chat" send is optimistic on the frontend (see sendMessage
   // below) - if the server rejects it (e.g. no follow relationship), the
   // sender otherwise never finds out and the message stays shown as if it
-  // went through. Roll back the optimistic entry and surface why.
+  // went through. Roll back that optimistic entry and surface why.
   useEffect(() => {
     const otherUserId = parseInt(userId);
     return subscribe("chat_error", (err) => {
       if (err.recipient_id !== otherUserId) return;
-      setMessages((prev) => prev.filter((m) => !m.pending));
+      setMessages((prev) =>
+        err.client_id
+          ? dropPendingMessage(prev, err.client_id)
+          : prev.filter((m) => !m.pending),
+      );
       toast.error(err.error || "Failed to send message");
     });
   }, [subscribe, userId]);
@@ -122,17 +301,21 @@ export default function ChatDetailPage() {
     setSending(true);
     const content = newMessage.trim();
     setNewMessage("");
+    setPickerOpen(false);
+    clearTimeout(typingIdleTimerRef.current);
+    sendTyping(false);
 
+    const clientId = newClientId();
     const optimisticMsg = {
-      id: Date.now(),
+      id: clientId,
+      client_id: clientId,
       sender_id: user.id,
       content,
       created_at: new Date().toISOString(),
       sender: { first_name: "You", last_name: "" },
-      // Cleared once the send is confirmed - a chat_error event for this
-      // recipient removes any message still flagged pending (see the
-      // chat_error subscription above), since the WS send below doesn't
-      // wait for a server response before showing "sent".
+      // Cleared by the server's "ack" (which swaps in the real id), or the
+      // message is removed by a chat_error - both matched by client_id,
+      // since the WS send below doesn't wait for a response before showing it.
       pending: true,
     };
 
@@ -140,7 +323,7 @@ export default function ChatDetailPage() {
     if (
       send({
         type: "chat",
-        data: { recipient_id: parseInt(userId), content },
+        data: { recipient_id: parseInt(userId), content, client_id: clientId },
       })
     ) {
       setMessages((prev) => [...prev, optimisticMsg]);
@@ -159,10 +342,15 @@ export default function ChatDetailPage() {
         throw new Error(data.error || "Failed to send message");
       }
 
-      setMessages((prev) => [
-        ...prev,
-        { ...optimisticMsg, id: data.message_id || optimisticMsg.id },
-      ]);
+      setMessages((prev) =>
+        mergeMessages(prev, [
+          {
+            ...optimisticMsg,
+            id: data.message_id || optimisticMsg.id,
+            pending: !data.message_id,
+          },
+        ]),
+      );
     } catch (error) {
       console.error("Error sending message:", error);
       toast.error(error.message || "Failed to send message");
@@ -182,104 +370,112 @@ export default function ChatDetailPage() {
 
   if (!otherUser) {
     return (
-      <div className='max-w-4xl mx-auto py-12 px-4 text-center'>
-        <h2 className='text-2xl font-bold text-gray-600'>User not found</h2>
-        <button
-          onClick={() => router.push("/chat")}
-          className='mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600'>
-          Back to Chats
-        </button>
+      <div className='dm-page'>
+        <div className='dm-state-card'>
+          <h2 className='dm-state-title'>User not found</h2>
+          <button onClick={() => router.push("/chat")} className='dm-btn dm-btn--primary'>
+            Back to Messages
+          </button>
+        </div>
       </div>
     );
   }
+
+  const otherName = `${otherUser.first_name || ""} ${otherUser.last_name || ""}`.trim();
 
   // Neither user follows the other - direct messages require a follow
   // relationship in either direction, so there's no conversation to show.
   if (blocked) {
     return (
-      <div className='max-w-md mx-auto py-12 px-4 text-center'>
-        <div className='w-16 h-16 rounded-full bg-blue-500 flex items-center justify-center text-white text-xl font-bold mx-auto'>
-          {otherUser?.first_name?.[0] || "U"}
-        </div>
-        <h2 className='text-xl font-bold mt-4'>
-          {otherUser?.first_name} {otherUser?.last_name}
-        </h2>
-        <p className='text-gray-600 mt-3'>
-          🔒 You can't message {otherUser?.first_name} yet. You can only send
-          direct messages to people who follow you or that you follow.
-        </p>
-        <div className='mt-4 flex justify-center gap-2'>
-          <button
-            onClick={() => router.push(`/profile/${userId}`)}
-            className='px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition'>
-            View Profile
-          </button>
-          <button
-            onClick={() => router.push("/chat")}
-            className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
-            Back to Chats
-          </button>
+      <div className='dm-page'>
+        <div className='dm-state-card'>
+          <Avatar user={otherUser} size='xl' />
+          <h2 className='dm-state-title'>{otherName}</h2>
+          <p className='dm-state-text'>
+            🔒 You can&apos;t message {otherUser.first_name} yet. You can only send
+            direct messages to people who follow you or that you follow.
+          </p>
+          <div className='dm-state-actions'>
+            <button onClick={() => router.push(`/profile/${userId}`)} className='dm-btn dm-btn--primary'>
+              View Profile
+            </button>
+            <button onClick={() => router.push("/chat")} className='dm-btn dm-btn--secondary'>
+              Back to Messages
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
+  // Status line under their name: typing beats online/offline; while our
+  // own connection is down we can't know either.
+  const status = !isConnected
+    ? { text: "Reconnecting…", tone: "muted" }
+    : otherTyping
+      ? { text: "typing…", tone: "typing" }
+      : otherOnline === null
+        ? null
+        : otherOnline
+          ? { text: "Online", tone: "online" }
+          : { text: "Offline", tone: "muted" };
+
   return (
-    <div className='max-w-4xl mx-auto py-4 px-4 h-[calc(100vh-12rem)]'>
-      <div className='bg-white rounded-lg shadow h-full flex flex-col'>
+    <div className='dm-page'>
+      <div className='dm-card'>
         {/* Header */}
-        <div className='p-4 border-b flex items-center'>
+        <div className='dm-header'>
           <button
-            onClick={() => router.push("/chat")}
-            className='text-blue-500 hover:text-blue-700 mr-4'>
-            ← Back
+            type='button'
+            className='dm-header-person'
+            onClick={() => router.push(`/profile/${userId}`)}
+            title='View profile'>
+            <span className='chats-avatar'>
+              <Avatar user={otherUser} size='lg' />
+              {isConnected && otherOnline && <span className='chats-online-dot' />}
+            </span>
+            <span className='dm-header-text'>
+              <span className='dm-header-name'>{otherName}</span>
+              {status && (
+                <span className={`dm-status dm-status--${status.tone}`}>{status.text}</span>
+              )}
+            </span>
           </button>
-          <div className='w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold'>
-            {otherUser?.first_name?.[0] || "U"}
-          </div>
-          <div className='ml-3'>
-            <h2 className='font-semibold'>
-              {otherUser?.first_name} {otherUser?.last_name}
-            </h2>
-            <p
-              className={`text-xs ${isConnected ? "text-green-500" : "text-gray-400"}`}>
-              {isConnected ? "🟢 Online" : "⚪ Offline"}
-            </p>
-          </div>
         </div>
 
         {/* Messages */}
-        <div className='flex-1 overflow-y-auto p-4 space-y-3'>
+        <div className='dm-messages'>
           {messages.length === 0 ? (
-            <div className='text-center text-gray-400 py-8'>
-              <p>No messages yet</p>
-              <p className='text-sm'>Say hello!</p>
+            <div className='dm-empty'>
+              <Avatar user={otherUser} size='xl' />
+              <p className='dm-empty-title'>This is the start of your chat with {otherUser.first_name}</p>
+              <p className='dm-empty-sub'>Say hello 👋</p>
             </div>
           ) : (
             messages.map((msg, index) => {
               const isTheirs = msg.sender_id === parseInt(userId);
+              const prev = messages[index - 1];
+              const newDay =
+                !prev || new Date(prev.created_at).toDateString() !== new Date(msg.created_at).toDateString();
+              // Consecutive messages from the same person are grouped.
+              const grouped = !newDay && prev && prev.sender_id === msg.sender_id;
               return (
-                <div
-                  key={msg.id || index}
-                  className={`flex ${isTheirs ? "justify-start" : "justify-end"}`}>
-                  <div
-                    className={`max-w-[70%] p-3 rounded-lg ${
-                      isTheirs
-                        ? "bg-gray-200 text-gray-800"
-                        : "bg-blue-500 text-white"
-                    }`}>
-                    {isTheirs && msg.sender && (
-                      <p className='text-xs font-semibold text-blue-100 mb-1'>
-                        {msg.sender.first_name}
-                      </p>
-                    )}
-                    <p>{msg.content}</p>
-                    <p
-                      className={`text-xs mt-1 ${isTheirs ? "text-gray-500" : "text-blue-100"}`}>
-                      {formatDistanceToNow(new Date(msg.created_at), {
-                        addSuffix: true,
-                      })}
-                    </p>
+                <div key={msg.client_id || msg.id || index}>
+                  {newDay && (
+                    <div className='dm-day'>
+                      <span>{dayLabel(msg.created_at)}</span>
+                    </div>
+                  )}
+                  <div className={`dm-row ${isTheirs ? "dm-row--theirs" : "dm-row--mine"} ${grouped ? "dm-row--grouped" : ""}`}>
+                    <div
+                      className={`dm-bubble ${isTheirs ? "dm-bubble--theirs" : "dm-bubble--mine"} ${msg.pending ? "dm-bubble--pending" : ""}`}
+                      title={formatDistanceToNow(new Date(msg.created_at), { addSuffix: true })}>
+                      <p className='dm-bubble-text'>{msg.content}</p>
+                      <span className='dm-bubble-time'>
+                        {clockTime(msg.created_at)}
+                        {!isTheirs && (msg.pending ? " · sending" : " ✓")}
+                      </span>
+                    </div>
                   </div>
                 </div>
               );
@@ -288,21 +484,43 @@ export default function ChatDetailPage() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <form onSubmit={sendMessage} className='p-4 border-t flex space-x-2'>
+        {/* Composer */}
+        <form onSubmit={sendMessage} className='dm-composer'>
+          <div className='dm-emoji' ref={pickerRef}>
+            <button
+              type='button'
+              className='dm-emoji-btn'
+              onClick={() => setPickerOpen((v) => !v)}
+              aria-label='Insert emoji'
+              aria-expanded={pickerOpen}>
+              😊
+            </button>
+            {pickerOpen && (
+              <div className='dm-emoji-grid' role='listbox' aria-label='Emoji'>
+                {CHAT_EMOJIS.map((emoji) => (
+                  <button key={emoji} type='button' className='dm-emoji-option' onClick={() => insertEmoji(emoji)}>
+                    {emoji}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <input
+            ref={inputRef}
             type='text'
             value={newMessage}
-            onChange={(e) => setNewMessage(e.target.value)}
-            placeholder={isConnected ? "Type a message..." : "Connecting..."}
-            className='flex-1 px-4 py-2 border rounded-full focus:outline-none focus:ring-2 focus:ring-blue-500'
+            onChange={(e) => handleDraftChange(e.target.value)}
+            placeholder={isConnected ? `Message ${otherUser.first_name}…` : "Connecting…"}
+            className='dm-input rounded-full'
             disabled={!isConnected && !sending}
+            aria-label='Message'
           />
           <button
             type='submit'
             disabled={!newMessage.trim() || sending}
-            className='px-6 py-2 bg-blue-500 text-white rounded-full hover:bg-blue-600 transition disabled:opacity-50'>
-            {sending ? "Sending..." : "Send"}
+            className='dm-send'
+            aria-label='Send'>
+            {sending ? "…" : "➤"}
           </button>
         </form>
       </div>

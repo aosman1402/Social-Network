@@ -15,7 +15,21 @@ import (
 // The caller gets a real, fully-migrated schema to exercise handlers
 // against - the same schema the actual server runs, not a hand-rolled
 // subset that could drift from the real migrations.
+//
+// The demo data from migration 000022 is removed again (the same way its
+// down migration does), so tests start from an empty database and can
+// count what they create. newSeededTestDB keeps it.
 func newTestDB(t *testing.T) *sql.DB {
+    t.Helper()
+    db := newSeededTestDB(t)
+    if _, err := db.Exec(`DELETE FROM users WHERE email LIKE '%@demo.test'`); err != nil {
+        t.Fatalf("failed to remove demo data: %v", err)
+    }
+    return db
+}
+
+// newSeededTestDB is newTestDB with the demo data still in it.
+func newSeededTestDB(t *testing.T) *sql.DB {
     t.Helper()
 
     dbPath := filepath.Join(t.TempDir(), "test.db")

@@ -325,3 +325,98 @@ func TestAnsweringJoinRequestNotifiesAndClears(t *testing.T) {
         t.Errorf("creator has %d unread group_request notifications, want 1 (only the unanswered one)", got)
     }
 }
+
+// TestMemberWhoIsNotCreatorCanInvite - the audit check "Can a user make
+// group invitations, after being part of the group (being the user
+// different from the creator of the group)?". The invite goes out, the
+// invitee is notified, and accepting credits the member who invited them,
+// not the creator. Someone who isn't an active member can't invite.
+func TestMemberWhoIsNotCreatorCanInvite(t *testing.T) {
+    db := newTestDB(t)
+    gh := &GroupHandler{DB: db}
+
+    creatorID := registerTestUser(t, db, "creator@example.com")
+    memberID := registerTestUser(t, db, "member@example.com")
+    friendID := registerTestUser(t, db, "friend@example.com")
+    outsiderID := registerTestUser(t, db, "outsider@example.com")
+    groupID := createTestGroup(t, gh, creatorID)
+    if _, err := db.Exec(
+        `INSERT INTO group_members (group_id, user_id, status) VALUES (?, ?, 'active')`,
+        groupID, memberID,
+    ); err != nil {
+        t.Fatalf("add member: %v", err)
+    }
+    // The member follows the friend - the creator has no link to them.
+    insertAcceptedFollow(t, db, memberID, friendID)
+    insertAcceptedFollow(t, db, outsiderID, friendID)
+
+    if w := callAs(t, gh.InviteUserToGroup, outsiderID, "/api/group/invite", map[string]interface{}{
+        "user_id": friendID, "group_id": groupID,
+    }); w.Code != http.StatusForbidden {
+        t.Errorf("non-member invite: status = %d, want 403", w.Code)
+    }
+
+    if w := callAs(t, gh.InviteUserToGroup, memberID, "/api/group/invite", map[string]interface{}{
+        "user_id": friendID, "group_id": groupID,
+    }); w.Code != http.StatusOK {
+        t.Fatalf("member invite: status = %d, body = %s", w.Code, w.Body.String())
+    }
+    if got := membershipStatus(t, db, groupID, friendID); got != "invited" {
+        t.Errorf("friend's status = %q, want invited", got)
+    }
+    if n := countNotifications(t, db, friendID, "group_invitation", true); n != 1 {
+        t.Errorf("friend got %d group_invitation notifications, want 1", n)
+    }
+
+    if w := callAs(t, gh.HandleGroupInvitation, friendID, "/api/group/invitation", map[string]interface{}{
+        "group_id": groupID, "action": "accept",
+    }); w.Code != http.StatusOK {
+        t.Fatalf("accept: status = %d, body = %s", w.Code, w.Body.String())
+    }
+    if got := membershipStatus(t, db, groupID, friendID); got != "active" {
+        t.Errorf("friend's status after accept = %q, want active", got)
+    }
+    if got := queryNotificationType(t, db, memberID, "group_invitation_accepted"); got == "" {
+        t.Error("the inviting member was not told the invitation was accepted")
+    }
+    if got := queryNotificationType(t, db, creatorID, "group_invitation_accepted"); got != "" {
+        t.Error("the creator was notified about an invitation they didn't send")
+    }
+}
+
+// TestGroupDetailListsInvitedMembers - members see who's already invited
+// (so the invite list can leave them out), and the member count still only
+// counts active members.
+func TestGroupDetailListsInvitedMembers(t *testing.T) {
+    db := newTestDB(t)
+    gh := &GroupHandler{DB: db}
+    creatorID := registerTestUser(t, db, "creator@example.com")
+    inviteeID := registerTestUser(t, db, "invitee@example.com")
+    insertAcceptedFollow(t, db, inviteeID, creatorID)
+    groupID := createTestGroup(t, gh, creatorID)
+    callAs(t, gh.InviteUserToGroup, creatorID, "/api/group/invite", map[string]interface{}{
+        "user_id": inviteeID, "group_id": groupID,
+    })
+
+    w := httptest.NewRecorder()
+    gh.GetGroup(w, withUserID(httptest.NewRequest(http.MethodGet, "/api/group/detail?id="+itoa(groupID), nil), creatorID))
+    var detail struct {
+        MemberCount int `json:"member_count"`
+        Members     []struct {
+            Status string `json:"status"`
+            User   struct {
+                ID int64 `json:"id"`
+            } `json:"user"`
+        } `json:"members"`
+    }
+    if err := json.Unmarshal(w.Body.Bytes(), &detail); err != nil {
+        t.Fatalf("bad detail body %s", w.Body.String())
+    }
+    if detail.MemberCount != 1 {
+        t.Errorf("member_count = %d, want 1 (the invitee isn't a member yet)", detail.MemberCount)
+    }
+    if len(detail.Members) != 2 || detail.Members[0].User.ID != creatorID ||
+        detail.Members[1].User.ID != inviteeID || detail.Members[1].Status != "invited" {
+        t.Errorf("members = %+v, want the creator (active) then the invitee (invited)", detail.Members)
+    }
+}

@@ -88,7 +88,7 @@ func TestChatUnreadCountAndReadReceipt(t *testing.T) {
 
 	var messageIDs []int64
 	for _, content := range []string{"one", "two"} {
-		sent, err := websocket.SendPrivateMessage(db, hub, userA, userB, content, false)
+		sent, err := websocket.SendPrivateMessage(db, hub, userA, userB, content)
 		if err != nil {
 			t.Fatalf("SendPrivateMessage: %v", err)
 		}

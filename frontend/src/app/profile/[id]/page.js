@@ -451,34 +451,30 @@ export default function ProfileDetailPage() {
   const postsCount = userPosts.length || profile.posts_count || 0;
 
   return (
-    <div className='max-w-3xl mx-auto py-4 px-4'>
+    <div className='profile-page'>
       {/* Profile Header */}
-      <div className='bg-white rounded-lg shadow'>
+      <div className='profile-card'>
         {/* Cover Image */}
-        <div className='h-24 bg-gradient-to-r from-blue-400 to-purple-500 rounded-t-lg'></div>
+        <div className='profile-cover' />
 
         {/* Profile Info */}
-        <div className='px-6 pb-6'>
-          <div className='flex flex-col md:flex-row items-start md:items-end -mt-12 mb-4'>
+        <div className='profile-info'>
+          <div className='profile-identity'>
             {/* Avatar */}
-            <div className='rounded-full border-4 border-white shadow-lg'>
+            <div className='profile-avatar'>
               <Avatar user={profile} size='2xl' />
             </div>
 
             {/* User Info */}
-            <div className='flex-1 mt-4 md:mt-0 md:ml-4'>
+            <div className='profile-details'>
               <div className='flex flex-wrap items-center gap-2'>
                 <h1 className='text-2xl font-bold'>
                   {profile.first_name} {profile.last_name}
                 </h1>
                 {profile.is_public ? (
-                  <span className='text-xs bg-green-100 text-green-700 px-2 py-0.5 rounded-full'>
-                    Public
-                  </span>
+                  <span className='profile-badge profile-badge--public'>Public</span>
                 ) : (
-                  <span className='text-xs bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded-full'>
-                    Private
-                  </span>
+                  <span className='profile-badge profile-badge--private'>Private</span>
                 )}
               </div>
 
@@ -506,12 +502,12 @@ export default function ProfileDetailPage() {
             </div>
 
             {/* Follow / Edit Button */}
-            <div className='mt-4 md:mt-0 flex items-center gap-2'>
+            <div className='profile-actions'>
               {isOwnProfile ? (
                 <>
                   <button
                     onClick={() => router.push("/settings")}
-                    className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
+                    className='profile-btn profile-btn--secondary'>
                     Edit Profile
                   </button>
                   <button
@@ -522,10 +518,8 @@ export default function ProfileDetailPage() {
                         ? "Switch to a private profile"
                         : "Switch to a public profile"
                     }
-                    className={`px-4 py-2 rounded-lg font-medium transition disabled:opacity-50 ${
-                      profile.is_public
-                        ? "bg-green-100 text-green-700 hover:bg-yellow-100 hover:text-yellow-800"
-                        : "bg-yellow-100 text-yellow-800 hover:bg-green-100 hover:text-green-700"
+                    className={`profile-btn ${
+                      profile.is_public ? "profile-btn--public" : "profile-btn--private"
                     }`}>
                     {togglingPrivacy
                       ? "Saving..."
@@ -538,12 +532,12 @@ export default function ProfileDetailPage() {
                 <>
                   <button
                     onClick={handleFollowToggle}
-                    className={`px-4 py-2 rounded-lg font-medium transition ${
+                    className={`profile-btn ${
                       profile.is_following
-                        ? "bg-gray-200 text-gray-700 hover:bg-gray-300"
+                        ? "profile-btn--secondary"
                         : profile.is_pending
-                          ? "bg-yellow-100 text-yellow-800 hover:bg-red-100 hover:text-red-700"
-                          : "bg-blue-500 text-white hover:bg-blue-600"
+                          ? "profile-btn--pending"
+                          : "profile-btn--primary"
                     }`}>
                     {profile.is_following
                       ? "Following"
@@ -558,7 +552,7 @@ export default function ProfileDetailPage() {
                         ? "Send a message"
                         : "Direct messages require a follow relationship - you'll see why if this is blocked"
                     }
-                    className='px-4 py-2 bg-gray-200 text-gray-700 rounded-lg hover:bg-gray-300 transition'>
+                    className='profile-btn profile-btn--secondary'>
                     Message
                   </button>
                 </>
@@ -566,78 +560,49 @@ export default function ProfileDetailPage() {
             </div>
           </div>
 
-          {/* Stats */}
-          <div className='flex items-center gap-6 mt-4 pt-4 border-t'>
-            <button
-              onClick={() => setActiveTab("posts")}
-              className={`text-center hover:text-blue-500 transition ${activeTab === "posts" ? "text-blue-500" : ""}`}>
-              <p className='text-xl font-bold'>{postsCount}</p>
-              <p className='text-sm text-gray-500'>Posts</p>
-            </button>
-            <button
-              onClick={() => setActiveTab("followers")}
-              className={`text-center hover:text-blue-500 transition ${activeTab === "followers" ? "text-blue-500" : ""}`}>
-              <p className='text-xl font-bold'>
-                {profile.followers_count || 0}
-              </p>
-              <p className='text-sm text-gray-500'>Followers</p>
-            </button>
-            <button
-              onClick={() => setActiveTab("following")}
-              className={`text-center hover:text-blue-500 transition ${activeTab === "following" ? "text-blue-500" : ""}`}>
-              <p className='text-xl font-bold'>
-                {profile.following_count || 0}
-              </p>
-              <p className='text-sm text-gray-500'>Following</p>
-            </button>
+          {/* Stats - raised cards that also switch the tab below */}
+          <div className='profile-stats'>
+            {[
+              { tab: "posts", label: "Posts", count: postsCount },
+              { tab: "followers", label: "Followers", count: profile.followers_count || 0 },
+              { tab: "following", label: "Following", count: profile.following_count || 0 },
+            ].map(({ tab, label, count }) => (
+              <button
+                key={tab}
+                type='button'
+                onClick={() => setActiveTab(tab)}
+                aria-pressed={activeTab === tab}
+                className={`profile-stat ${activeTab === tab ? "profile-stat--active" : ""}`}>
+                <span className='profile-stat-count'>{count}</span>
+                <span className='profile-stat-label'>{label}</span>
+              </button>
+            ))}
           </div>
         </div>
       </div>
 
       {/* Tabs */}
-      <div className='mt-4 bg-white rounded-lg shadow'>
-        <div className='flex border-b'>
-          <button
-            onClick={() => setActiveTab("posts")}
-            className={`flex-1 py-3 text-sm font-medium transition ${
-              activeTab === "posts"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            Posts
-          </button>
-          <button
-            onClick={() => setActiveTab("followers")}
-            className={`flex-1 py-3 text-sm font-medium transition ${
-              activeTab === "followers"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            Followers ({profile.followers_count || 0})
-          </button>
-          <button
-            onClick={() => setActiveTab("following")}
-            className={`flex-1 py-3 text-sm font-medium transition ${
-              activeTab === "following"
-                ? "text-blue-600 border-b-2 border-blue-600"
-                : "text-gray-500 hover:text-gray-700"
-            }`}>
-            Following ({profile.following_count || 0})
-          </button>
-          {isOwnProfile && (
+      <div className='profile-card profile-content'>
+        <div className='profile-tabs' role='tablist'>
+          {[
+            { tab: "posts", label: "Posts" },
+            { tab: "followers", label: `Followers (${profile.followers_count || 0})` },
+            { tab: "following", label: `Following (${profile.following_count || 0})` },
+            ...(isOwnProfile ? [{ tab: "requests", label: `Requests (${pendingRequestsCount})` }] : []),
+          ].map(({ tab, label }) => (
             <button
-              onClick={() => setActiveTab("requests")}
-              className={`flex-1 py-3 text-sm font-medium transition ${
-                activeTab === "requests"
-                  ? "text-blue-600 border-b-2 border-blue-600"
-                  : "text-gray-500 hover:text-gray-700"
-              }`}>
-              Requests ({pendingRequestsCount})
+              key={tab}
+              type='button'
+              role='tab'
+              aria-selected={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              className={`profile-tab ${activeTab === tab ? "profile-tab--active" : ""}`}>
+              {label}
             </button>
-          )}
+          ))}
         </div>
 
-        <div className='p-4'>
+        <div className='profile-tab-body'>
           {/* Posts Tab */}
           {activeTab === "posts" && (
             <div className='space-y-4'>
@@ -654,9 +619,7 @@ export default function ProfileDetailPage() {
                 </div>
               ) : (
                 userPosts.map((post) => (
-                  <div
-                    key={post.id}
-                    className='bg-gray-50 rounded-lg p-4 border'>
+                  <div key={post.id} className='profile-post'>
                     {post.content?.trim() && (
                       <p className='text-gray-800 whitespace-pre-wrap break-words'>
                         {post.content}
@@ -694,7 +657,7 @@ export default function ProfileDetailPage() {
 
           {/* Followers Tab */}
           {activeTab === "followers" && (
-            <div className='space-y-3'>
+            <div className='profile-people'>
               {followers.length === 0 ? (
                 <p className='text-center text-gray-400 py-4'>
                   No followers yet
@@ -703,13 +666,10 @@ export default function ProfileDetailPage() {
                 followers.map((item) => (
                   <div
                     key={item.user.id}
-                    className='flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer'
+                    className='profile-person'
                     onClick={() => router.push(`/profile/${item.user.id}`)}>
                     <div className='flex items-center gap-3'>
-                      <div className='w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold'>
-                        {item.user.first_name?.[0]}
-                        {item.user.last_name?.[0]}
-                      </div>
+                      <Avatar user={item.user} size='md' />
                       <div>
                         <p className='font-medium'>
                           {item.user.first_name} {item.user.last_name}
@@ -729,7 +689,7 @@ export default function ProfileDetailPage() {
 
           {/* Following Tab */}
           {activeTab === "following" && (
-            <div className='space-y-3'>
+            <div className='profile-people'>
               {following.length === 0 ? (
                 <p className='text-center text-gray-400 py-4'>
                   Not following anyone yet
@@ -738,13 +698,10 @@ export default function ProfileDetailPage() {
                 following.map((item) => (
                   <div
                     key={item.user.id}
-                    className='flex items-center justify-between p-2 hover:bg-gray-50 rounded cursor-pointer'
+                    className='profile-person'
                     onClick={() => router.push(`/profile/${item.user.id}`)}>
                     <div className='flex items-center gap-3'>
-                      <div className='w-10 h-10 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold'>
-                        {item.user.first_name?.[0]}
-                        {item.user.last_name?.[0]}
-                      </div>
+                      <Avatar user={item.user} size='md' />
                       <div>
                         <p className='font-medium'>
                           {item.user.first_name} {item.user.last_name}

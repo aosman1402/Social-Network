@@ -123,7 +123,7 @@ func TestChatBlockedBetweenNonFollowingUsers(t *testing.T) {
 	// Deliberately left public (the default) and with no follow row at all
 	// in either direction.
 
-	_, err := websocket.SendPrivateMessage(db, hub, userA, userB, "hi", false)
+	_, err := websocket.SendPrivateMessage(db, hub, userA, userB, "hi")
 	if err != websocket.ErrNotAllowed {
 		t.Fatalf("SendPrivateMessage err = %v, want ErrNotAllowed", err)
 	}

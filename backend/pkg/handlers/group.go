@@ -145,6 +145,9 @@ func (gh *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
         groupID,
     ).Scan(&memberCount)
 
+    // Active members first, then people with an open invitation (shown
+    // with an "Invited" badge) - so members can see who's already been
+    // invited instead of inviting them again.
     members := []map[string]interface{}{}
     if isMember {
         rows, err := gh.DB.Query(
@@ -152,8 +155,8 @@ func (gh *GroupHandler) GetGroup(w http.ResponseWriter, r *http.Request) {
                     gm.status, gm.created_at
              FROM group_members gm
              JOIN users u ON gm.user_id = u.id
-             WHERE gm.group_id = ? AND gm.status = 'active'
-             ORDER BY gm.created_at DESC`,
+             WHERE gm.group_id = ? AND gm.status IN ('active', 'invited')
+             ORDER BY gm.status = 'invited', gm.created_at DESC`,
             groupID,
         )
         if err == nil {

@@ -8,6 +8,7 @@ import { toast } from "@/context/ToastContext";
 import { isValidEmail, isPasswordValid } from "@/utils/helpers";
 import PasswordRequirements from "@/components/PasswordRequirements";
 import AvatarPicker from "@/components/AvatarPicker";
+import GitHubLoginButton from "@/components/GitHubLoginButton";
 import NicknameField from "@/components/NicknameField";
 import { apiFetch } from "@/lib/api";
 
@@ -201,6 +202,11 @@ export default function RegisterPage() {
         <div className='text-center mb-8'>
           <h2 className='text-3xl font-bold text-gray-900'>Create Account</h2>
           <p className='text-gray-600 mt-2'>Join the social network</p>
+        </div>
+
+        <GitHubLoginButton label='Sign up with GitHub' />
+        <div className='auth-divider'>
+          <span>or with your email</span>
         </div>
 
         {/* noValidate: the browser's own type="email" check would otherwise

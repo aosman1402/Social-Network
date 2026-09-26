@@ -3,9 +3,12 @@ package websocket
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"log"
 	"strconv"
+	"strings"
 	"time"
+	"unicode/utf8"
 
 	gorilla "github.com/gorilla/websocket" // Import with alias "gorilla"
 )
@@ -18,14 +21,17 @@ const (
 )
 
 type Client struct {
-	Hub      *Hub
-	Conn     *gorilla.Conn // Use gorilla.Conn, not websocket.Conn
-	Send     chan []byte
-	UserID   int64
-	User     interface{}
-	RoomID   string
-	IsOnline bool
-	LastSeen time.Time
+	Hub    *Hub
+	Conn   *gorilla.Conn // Use gorilla.Conn, not websocket.Conn
+	Send   chan []byte
+	UserID int64
+	// SessionToken is the login session this connection was opened with,
+	// so logging out can close it (Hub.DisconnectSession).
+	SessionToken string
+	User         interface{}
+	RoomID       string
+	IsOnline     bool
+	LastSeen     time.Time
 }
 
 // WritePump pumps messages from the hub to the websocket connection
@@ -46,20 +52,13 @@ func (c *Client) WritePump() {
 				return
 			}
 
-			w, err := c.Conn.NextWriter(gorilla.TextMessage) // Use gorilla.TextMessage
-			if err != nil {
-				return
-			}
-			w.Write(message)
-
-			// Add queued messages to the same websocket message
-			n := len(c.Send)
-			for i := 0; i < n; i++ {
-				w.Write([]byte{'\n'})
-				w.Write(<-c.Send)
-			}
-
-			if err := w.Close(); err != nil {
+			// One event per WebSocket frame. Queued events used to be
+			// packed into a single frame separated by newlines, which the
+			// browser can't parse as JSON - so whenever two or more events
+			// reached a user at nearly the same moment (a burst of chat
+			// messages, a notification plus a typing event...), all of
+			// them were silently dropped.
+			if err := c.Conn.WriteMessage(gorilla.TextMessage, message); err != nil {
 				return
 			}
 
@@ -113,16 +112,33 @@ func (c *Client) ReadPump(db *sql.DB) {
 				RecipientID int64  `json:"recipient_id"`
 				GroupID     int64  `json:"group_id"`
 				Content     string `json:"content"`
+				// ClientID is the sender's temporary id for its optimistic
+				// copy, echoed back in the ack / chat_error so the page can
+				// swap in the real message (or drop that one message) even
+				// if replies arrive out of order.
+				ClientID string `json:"client_id"`
 			}
 			if err := json.Unmarshal(wsMsg.Data, &chatData); err != nil {
 				log.Printf("Failed to parse chat data: %v", err)
 				continue
 			}
 
-			// Handle private or group chat
+			// Handle private or group chat. Handled inline, not in a new
+			// goroutine per message: goroutines race each other, so a
+			// quick run of messages from one sender used to be saved and
+			// delivered in a shuffled order.
 			if chatData.RecipientID != 0 {
-				go func() {
-					if _, err := SendPrivateMessage(db, c.Hub, c.UserID, chatData.RecipientID, chatData.Content, true); err != nil {
+				func() {
+					sent, err := SendPrivateMessage(db, c.Hub, c.UserID, chatData.RecipientID, chatData.Content)
+					if err == nil {
+						broadcastEvent(c.Hub, "user_"+strconv.FormatInt(c.UserID, 10), "ack", map[string]interface{}{
+							"message":      "sent",
+							"message_id":   sent.MessageID,
+							"client_id":    chatData.ClientID,
+							"recipient_id": chatData.RecipientID,
+							"created_at":   sent.CreatedAt,
+						})
+					} else {
 						log.Printf("Failed to send private message: %v", err)
 
 						// The WebSocket path previously failed silently from
@@ -136,12 +152,28 @@ func (c *Client) ReadPump(db *sql.DB) {
 						}
 						broadcastEvent(c.Hub, "user_"+strconv.FormatInt(c.UserID, 10), "chat_error", map[string]interface{}{
 							"recipient_id": chatData.RecipientID,
+							"client_id":    chatData.ClientID,
 							"error":        errMsg,
 						})
 					}
 				}()
 			} else if chatData.GroupID != 0 {
-				go handleGroupMessage(db, c.UserID, chatData.GroupID, chatData.Content, c.Hub)
+				func() {
+					if err := SendGroupMessage(db, c.Hub, c.UserID, chatData.GroupID, chatData.Content); err != nil {
+						log.Printf("Failed to send group message: %v", err)
+						errMsg := "Failed to send message"
+						switch err {
+						case ErrInvalidContent:
+							errMsg = "Messages must be between 1 and 1000 characters"
+						case ErrNotAllowed:
+							errMsg = "You are not a member of this group"
+						}
+						broadcastEvent(c.Hub, "user_"+strconv.FormatInt(c.UserID, 10), "chat_error", map[string]interface{}{
+							"group_id": chatData.GroupID,
+							"error":    errMsg,
+						})
+					}
+				}()
 			}
 
 		case "typing":
@@ -176,51 +208,59 @@ func (c *Client) ReadPump(db *sql.DB) {
 	}
 }
 
-func handleGroupMessage(db *sql.DB, senderID, groupID int64, content string, hub *Hub) {
+// MaxChatMessageLength caps a chat message's length in characters (runes,
+// so emoji count as one each rather than as their 4 UTF-8 bytes).
+const MaxChatMessageLength = 1000
+
+// ErrInvalidContent is returned for a chat message that is empty,
+// whitespace-only, or longer than MaxChatMessageLength.
+var ErrInvalidContent = errors.New("message must be between 1 and 1000 characters")
+
+// validateChatContent trims content and checks it against the rules above.
+func validateChatContent(content string) (string, error) {
+	content = strings.TrimSpace(content)
+	if content == "" || utf8.RuneCountInString(content) > MaxChatMessageLength {
+		return "", ErrInvalidContent
+	}
+	return content, nil
+}
+
+// SendGroupMessage saves a group chat message and delivers it as a "chat"
+// event to every active member of the group - including the sender, whose
+// other open tabs need it too, and whose group chat panel shows the
+// server's copy rather than an optimistic one.
+func SendGroupMessage(db *sql.DB, hub *Hub, senderID, groupID int64, content string) error {
+	content, err := validateChatContent(content)
+	if err != nil {
+		return err
+	}
 	if !isActiveGroupMember(db, groupID, senderID) {
-		return
+		return ErrNotAllowed
 	}
 
-	// Save message
+	createdAt := time.Now()
 	result, err := db.Exec(
 		`INSERT INTO messages (sender_id, group_id, content, is_group_message, created_at)
          VALUES (?, ?, ?, ?, ?)`,
-		senderID, groupID, content, true, time.Now(),
+		senderID, groupID, content, true, createdAt,
 	)
 	if err != nil {
-		log.Printf("Failed to save group message: %v", err)
-		return
+		return err
 	}
-
 	messageID, _ := result.LastInsertId()
 
-	// Get sender info
-	var sender struct {
-		ID        int64  `json:"id"`
-		Email     string `json:"email"`
-		FirstName string `json:"first_name"`
-		LastName  string `json:"last_name"`
-		Nickname  string `json:"nickname"`
-		Avatar    string `json:"avatar_path"`
-	}
-	db.QueryRow(
-		`SELECT id, email, first_name, last_name, nickname, avatar_path 
-         FROM users WHERE id = ?`,
-		senderID,
-	).Scan(&sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.Avatar)
-
-	// Create message object
 	msg := map[string]interface{}{
 		"id":         messageID,
 		"sender_id":  senderID,
 		"group_id":   groupID,
 		"content":    content,
-		"created_at": time.Now(),
-		"sender":     sender,
+		"created_at": createdAt,
+		"sender":     loadSenderInfo(db, senderID),
 	}
 	for _, memberID := range activeGroupMemberIDs(db, groupID) {
 		broadcastEvent(hub, "user_"+strconv.FormatInt(memberID, 10), "chat", msg)
 	}
+	return nil
 }
 
 // isActiveGroupMember reports whether userID is an active member of groupID.
@@ -252,9 +292,14 @@ func activeGroupMemberIDs(db *sql.DB, groupID int64) []int64 {
 	var ids []int64
 	for rows.Next() {
 		var id int64
-		if rows.Scan(&id) == nil {
-			ids = append(ids, id)
+		if err := rows.Scan(&id); err != nil {
+			log.Printf("Failed to scan member of group %d: %v", groupID, err)
+			continue
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("Listing members of group %d stopped early: %v", groupID, err)
 	}
 	return ids
 }

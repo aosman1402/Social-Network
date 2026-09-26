@@ -5,10 +5,17 @@ import (
     "log"
     "net/http"
     "strconv"
+    "strings"
     "time"
+    "unicode/utf8"
 
     "social-network/pkg/middleware"
     "social-network/pkg/models"
+)
+
+const (
+    maxEventTitleLength       = 100
+    maxEventDescriptionLength = 1000
 )
 
 // CreateEvent - Create a group event
@@ -27,14 +34,33 @@ func (gh *GroupHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
         return
     }
 
+    req.Title = strings.TrimSpace(req.Title)
+    req.Description = strings.TrimSpace(req.Description)
     if req.Title == "" || req.EventTime == "" {
         writeJSONError(w, http.StatusBadRequest, "Title and time are required")
         return
     }
+    if utf8.RuneCountInString(req.Title) > maxEventTitleLength {
+        writeJSONError(w, http.StatusBadRequest, "Title must be at most 100 characters")
+        return
+    }
+    if utf8.RuneCountInString(req.Description) > maxEventDescriptionLength {
+        writeJSONError(w, http.StatusBadRequest, "Description must be at most 1000 characters")
+        return
+    }
 
+    // Stored in UTC (below) and sorted with datetime(): event_time is
+    // compared as text by SQLite, so "10:00+05:00" (05:00 UTC) used to sort
+    // after "08:00+00:00".
     eventTime, err := time.Parse(time.RFC3339, req.EventTime)
     if err != nil {
         writeJSONError(w, http.StatusBadRequest, "Invalid event time format")
+        return
+    }
+    // A minute of slack so an event set for "now" isn't rejected by the
+    // time the request arrives.
+    if eventTime.Before(time.Now().Add(-time.Minute)) {
+        writeJSONError(w, http.StatusBadRequest, "Event time can't be in the past")
         return
     }
 
@@ -51,7 +77,7 @@ func (gh *GroupHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
     result, err := gh.DB.Exec(
         `INSERT INTO events (group_id, creator_id, title, description, event_time, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        req.GroupID, userID, req.Title, req.Description, eventTime, time.Now(), time.Now(),
+        req.GroupID, userID, req.Title, req.Description, eventTime.UTC(), time.Now(), time.Now(),
     )
     if err != nil {
         log.Printf("CreateEvent: failed to insert event: %v", err)
@@ -61,7 +87,7 @@ func (gh *GroupHandler) CreateEvent(w http.ResponseWriter, r *http.Request) {
 
     eventID, _ := result.LastInsertId()
 
-    var creator models.User
+    creator := models.User{ID: userID}
     gh.DB.QueryRow(
         "SELECT first_name, last_name FROM users WHERE id = ?",
         userID,
@@ -158,7 +184,7 @@ func (gh *GroupHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
          FROM events e
          JOIN users u ON e.creator_id = u.id
          WHERE e.group_id = ?
-         ORDER BY e.event_time ASC
+         ORDER BY datetime(e.event_time) ASC
          LIMIT ? OFFSET ?`,
         groupID, limit, offset,
     )
@@ -197,38 +223,10 @@ func (gh *GroupHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
             event.ID, userID,
         ).Scan(&userResponse)
 
-        responses := []map[string]interface{}{}
-        rows2, err := gh.DB.Query(
-            `SELECT er.user_id, er.response, er.created_at,
-                    u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path, u.is_public
-             FROM event_responses er
-             JOIN users u ON er.user_id = u.id
-             WHERE er.event_id = ?`,
-            event.ID,
-        )
-        if err == nil {
-            defer rows2.Close()
-            for rows2.Next() {
-                var user models.User
-                var response string
-                var createdAt time.Time
-                err := rows2.Scan(
-                    &user.ID, &response, &createdAt,
-                    &user.ID, &user.Email, &user.FirstName, &user.LastName,
-                    &user.Nickname, &user.AvatarPath, &user.IsPublic,
-                )
-                if err == nil {
-                    responses = append(responses, map[string]interface{}{
-                        "user":      user,
-                        "response":  response,
-                        "created_at": createdAt,
-                    })
-                }
-            }
-            if err = rows2.Err(); err != nil {
-                writeJSONError(w, http.StatusInternalServerError, "Error iterating responses")
-                return
-            }
+        responses, err := gh.eventResponses(event.ID)
+        if err != nil {
+            writeJSONError(w, http.StatusInternalServerError, "Failed to get event responses")
+            return
         }
 
         events = append(events, map[string]interface{}{
@@ -250,6 +248,106 @@ func (gh *GroupHandler) GetEvents(w http.ResponseWriter, r *http.Request) {
     }
 
     json.NewEncoder(w).Encode(events)
+}
+
+// DeleteEvent - DELETE /api/group/event/delete?id=N: the event's creator
+// cancels it (the same rule as deleting a post: only its author). Its
+// votes go with it (ON DELETE CASCADE), and members viewing the group get
+// a live "event_deleted" so the event disappears from their list.
+func (gh *GroupHandler) DeleteEvent(w http.ResponseWriter, r *http.Request) {
+    userID, _ := middleware.GetUserID(r)
+
+    if r.Method != http.MethodDelete && r.Method != http.MethodPost {
+        writeJSONError(w, http.StatusMethodNotAllowed, "Method not allowed")
+        return
+    }
+
+    eventID, err := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+    if err != nil {
+        writeJSONError(w, http.StatusBadRequest, "Invalid event ID")
+        return
+    }
+
+    var creatorID, groupID int64
+    err = gh.DB.QueryRow(
+        "SELECT creator_id, group_id FROM events WHERE id = ?", eventID,
+    ).Scan(&creatorID, &groupID)
+    if err != nil {
+        writeJSONError(w, http.StatusNotFound, "Event not found")
+        return
+    }
+    if creatorID != userID {
+        writeJSONError(w, http.StatusForbidden, "Only the event's creator can cancel it")
+        return
+    }
+
+    if _, err := gh.DB.Exec("DELETE FROM events WHERE id = ?", eventID); err != nil {
+        writeJSONError(w, http.StatusInternalServerError, "Failed to cancel event")
+        return
+    }
+
+    rows, err := gh.DB.Query(
+        "SELECT user_id FROM group_members WHERE group_id = ? AND status = 'active'", groupID,
+    )
+    if err == nil {
+        var memberIDs []int64
+        for rows.Next() {
+            var id int64
+            if rows.Scan(&id) == nil {
+                memberIDs = append(memberIDs, id)
+            }
+        }
+        rows.Close()
+        for _, id := range memberIDs {
+            gh.Hub.NotifyUserEvent(id, "event_deleted", map[string]interface{}{
+                "event_id": eventID,
+                "group_id": groupID,
+            })
+        }
+    }
+
+    json.NewEncoder(w).Encode(map[string]string{
+        "message": "Event cancelled",
+    })
+}
+
+// eventResponses lists who answered eventID and how. Its own function so
+// the rows are closed after each event - the loop in GetEvents used to
+// defer every event's Close until the whole handler returned.
+func (gh *GroupHandler) eventResponses(eventID int64) ([]map[string]interface{}, error) {
+    rows, err := gh.DB.Query(
+        `SELECT er.response, er.created_at,
+                u.id, u.email, u.first_name, u.last_name, u.nickname, u.avatar_path, u.is_public
+         FROM event_responses er
+         JOIN users u ON er.user_id = u.id
+         WHERE er.event_id = ?
+         ORDER BY er.created_at ASC`,
+        eventID,
+    )
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+
+    responses := []map[string]interface{}{}
+    for rows.Next() {
+        var user models.User
+        var response string
+        var createdAt time.Time
+        if err := rows.Scan(
+            &response, &createdAt,
+            &user.ID, &user.Email, &user.FirstName, &user.LastName,
+            &user.Nickname, &user.AvatarPath, &user.IsPublic,
+        ); err != nil {
+            continue
+        }
+        responses = append(responses, map[string]interface{}{
+            "user":       user,
+            "response":   response,
+            "created_at": createdAt,
+        })
+    }
+    return responses, rows.Err()
 }
 
 // RespondToEvent - Respond to an event (going/not going)
@@ -300,6 +398,29 @@ func (gh *GroupHandler) RespondToEvent(w http.ResponseWriter, r *http.Request) {
     if err != nil {
         writeJSONError(w, http.StatusInternalServerError, "Failed to respond to event")
         return
+    }
+
+    // Let members viewing the group refresh the event's going / not going
+    // counts live. Not a notification - nothing is stored or counted.
+    memberRows, err := gh.DB.Query(
+        "SELECT user_id FROM group_members WHERE group_id = ? AND status = 'active'",
+        groupID,
+    )
+    if err == nil {
+        var memberIDs []int64
+        for memberRows.Next() {
+            var id int64
+            if memberRows.Scan(&id) == nil {
+                memberIDs = append(memberIDs, id)
+            }
+        }
+        memberRows.Close()
+        for _, id := range memberIDs {
+            gh.Hub.NotifyUserEvent(id, "event_response", map[string]interface{}{
+                "event_id": req.EventID,
+                "group_id": groupID,
+            })
+        }
     }
 
     json.NewEncoder(w).Encode(map[string]string{

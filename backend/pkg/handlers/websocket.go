@@ -125,6 +125,8 @@ func (wsh *WebSocketHandler) HandleWebSocket(w http.ResponseWriter, r *http.Requ
         Conn:     conn,
         Send:     make(chan []byte, 256),
         UserID:   userID,
+        // Lets logout close this connection (Hub.DisconnectSession).
+        SessionToken: token,
         User:     &user,
         RoomID:   "",
         IsOnline: true,

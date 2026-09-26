@@ -9,6 +9,7 @@ import (
     "time"
 
     "social-network/pkg/middleware"
+    "social-network/pkg/websocket"
 
     "github.com/google/uuid"
     "golang.org/x/crypto/bcrypt"
@@ -28,6 +29,9 @@ var failedLoginTracker = middleware.NewRateLimiter(8, 5*time.Minute)
 
 type AuthHandler struct {
     DB *sql.DB
+    // Hub, when set, lets logout / password change close the live
+    // connections of the sessions they end. May be nil (e.g. in tests).
+    Hub *websocket.Hub
 }
 
 type RegisterRequest struct {
@@ -273,19 +277,32 @@ func (ah *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
         return
     }
 
-    sessionToken := uuid.New().String()
-    expiresAt := time.Now().Add(sessionDuration)
-
-    _, err = ah.DB.Exec(
-        "INSERT INTO sessions (user_id, session_token, expires_at, ip_address, fingerprint) VALUES (?, ?, ?, ?, ?)",
-        userID, sessionToken, expiresAt, middleware.ClientIP(r), r.Header.Get(middleware.DeviceFingerprintHeader),
-    )
-    if err != nil {
+    if err := startSession(ah.DB, w, r, userID); err != nil {
         w.WriteHeader(http.StatusInternalServerError)
         json.NewEncoder(w).Encode(map[string]string{
             "error": "Failed to create session",
         })
         return
+    }
+
+    json.NewEncoder(w).Encode(map[string]interface{}{
+        "message": "Login successful",
+        "user_id": userID,
+    })
+}
+
+// startSession creates a session for userID and sets its cookie on w.
+// Shared by password login and external (OAuth) login, so both produce
+// exactly the same kind of session.
+func startSession(db *sql.DB, w http.ResponseWriter, r *http.Request, userID int64) error {
+    sessionToken := uuid.New().String()
+    expiresAt := time.Now().Add(sessionDuration)
+
+    if _, err := db.Exec(
+        "INSERT INTO sessions (user_id, session_token, expires_at, ip_address, fingerprint) VALUES (?, ?, ?, ?, ?)",
+        userID, sessionToken, expiresAt, middleware.ClientIP(r), r.Header.Get(middleware.DeviceFingerprintHeader),
+    ); err != nil {
+        return err
     }
 
     // Set cookie. The token lives only here (HttpOnly, never in the response
@@ -301,11 +318,7 @@ func (ah *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
         Path:     "/",
         SameSite: http.SameSiteLaxMode,
     })
-
-    json.NewEncoder(w).Encode(map[string]interface{}{
-        "message": "Login successful",
-        "user_id": userID,
-    })
+    return nil
 }
 
 func (ah *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
@@ -314,6 +327,10 @@ func (ah *AuthHandler) Logout(w http.ResponseWriter, r *http.Request) {
     cookie, err := r.Cookie("session_token")
     if err == nil {
         ah.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
+        // A live connection is only authenticated when it opens - close
+        // every one this session has (other tabs included), so they stop
+        // receiving this user's messages and notifications.
+        ah.Hub.DisconnectSession(cookie.Value)
     }
 
     http.SetCookie(w, &http.Cookie{
@@ -489,6 +506,8 @@ func (ah *AuthHandler) ChangePassword(w http.ResponseWriter, r *http.Request) {
     }
 
     ah.DB.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
+    // Every session was just signed out - close their live connections too.
+    ah.Hub.DisconnectUser(userID)
 
     // This request's own session is gone too - clear its cookie.
     http.SetCookie(w, &http.Cookie{

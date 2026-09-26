@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bufio"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"social-network/pkg/db/sqlite"
@@ -19,6 +21,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to get current directory: %v", err)
 	}
+
+	// Optional local settings (e.g. the GitHub login keys) from backend/.env,
+	// which is gitignored. Real environment variables always win.
+	loadDotEnv(filepath.Join(cwd, ".env"))
 
 	// Database configuration
 	dbPath := os.Getenv("DB_PATH")
@@ -53,10 +59,11 @@ func main() {
 
 	// Initialize WebSocket hub
 	hub := websocket.NewHub()
+	handlers.EnablePresence(hub, db.DB) // live online/offline status
 	go hub.Run()
 
 	// Initialize handlers
-	authHandler := &handlers.AuthHandler{DB: db.DB}
+	authHandler := &handlers.AuthHandler{DB: db.DB, Hub: hub}
 	userHandler := &handlers.UserHandler{DB: db.DB, Hub: hub}
 	postHandler := &handlers.PostHandler{DB: db.DB, Hub: hub}
 	groupHandler := &handlers.GroupHandler{DB: db.DB, Hub: hub}
@@ -157,12 +164,29 @@ func main() {
 	http.HandleFunc("/api/group/events", cors(authMiddleware.Authenticate(groupHandler.GetEvents)))
 	http.HandleFunc("/api/group/event/create", cors(authMiddleware.Authenticate(groupHandler.CreateEvent)))
 	http.HandleFunc("/api/group/event/respond", cors(authMiddleware.Authenticate(groupHandler.RespondToEvent)))
+	http.HandleFunc("/api/group/event/delete", cors(authMiddleware.Authenticate(groupHandler.DeleteEvent)))
 	http.HandleFunc("/api/group/posts", cors(authMiddleware.Authenticate(groupHandler.GetGroupPosts)))
+
+	// Login with GitHub (OAuth 2.0) - see pkg/handlers/oauth_github.go
+	githubOAuth := handlers.NewGitHubOAuthFromEnv(db.DB)
+	if githubOAuth.Enabled() {
+		log.Printf("GitHub login enabled (callback: %s/api/auth/github/callback)", githubOAuth.BackendURL)
+	} else {
+		log.Printf("GitHub login disabled - set GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET to enable it")
+	}
+	http.HandleFunc("/api/auth/providers", cors(githubOAuth.Providers))
+	http.HandleFunc("/api/auth/github/login", githubOAuth.Login)
+	http.HandleFunc("/api/auth/github/callback", githubOAuth.Callback)
+	http.HandleFunc("/api/auth/oauth/pending", cors(githubOAuth.Pending))
+	http.HandleFunc("/api/auth/oauth/complete", cors(githubOAuth.Complete))
 
 	// Chat routes
 	http.HandleFunc("/api/chats", cors(authMiddleware.Authenticate(wsHandler.GetChats)))
 	http.HandleFunc("/api/messages/history", cors(authMiddleware.Authenticate(wsHandler.GetChatHistory)))
 	http.HandleFunc("/api/messages/send", cors(authMiddleware.Authenticate(wsHandler.SendMessage)))
+	http.HandleFunc("/api/messages/group-history", cors(authMiddleware.Authenticate(wsHandler.GetGroupChatHistory)))
+	http.HandleFunc("/api/chat/contacts", cors(authMiddleware.Authenticate(wsHandler.GetChatContacts)))
+	http.HandleFunc("/api/user/presence", cors(authMiddleware.Authenticate(wsHandler.GetPresence)))
 	http.HandleFunc("/api/messages/unread-count", cors(authMiddleware.Authenticate(wsHandler.GetUnreadMessageCount)))
 
 	// Notification routes
@@ -183,5 +207,33 @@ func main() {
 	log.Printf("Server starting on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("Failed to start server: %v", err)
+	}
+}
+
+// loadDotEnv sets KEY=VALUE pairs from path as environment variables,
+// skipping blank lines, # comments and any key that's already set. A
+// missing file is fine - every setting has a default or is optional.
+func loadDotEnv(path string) {
+	f, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		key = strings.TrimSpace(strings.TrimPrefix(key, "export "))
+		value = strings.Trim(strings.TrimSpace(value), `"'`)
+		if _, exists := os.LookupEnv(key); !exists && key != "" {
+			os.Setenv(key, value)
+		}
 	}
 }

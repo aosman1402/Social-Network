@@ -65,8 +65,9 @@ export const getNotificationTarget = (notification, currentUserId) => {
     case "group_invitation_accepted":
     case "group_invitation_declined":
     case "group_request_declined":
-    case "event_created":
       return `/groups/${relatedId}`;
+    case "event_created":
+      return `/groups/${relatedId}#events`;
     case "like":
       return `/?post=${postId}`;
     case "comment":
@@ -175,29 +176,33 @@ export const isValidEmail = (email) => {
   return regex.test(email);
 };
 
+// Gradients for avatars without a picture - from the site palette, all
+// dark enough for white initials.
+const AVATAR_GRADIENTS = [
+  "linear-gradient(135deg, #6366f1, #8b5cf6)", // indigo -> violet
+  "linear-gradient(135deg, #ec4899, #f43f5e)", // pink -> rose
+  "linear-gradient(135deg, #0ea5e9, #6366f1)", // sky -> indigo
+  "linear-gradient(135deg, #10b981, #0d9488)", // emerald -> teal
+  "linear-gradient(135deg, #f59e0b, #ef4444)", // amber -> red
+  "linear-gradient(135deg, #8b5cf6, #d946ef)", // violet -> fuchsia
+  "linear-gradient(135deg, #14b8a6, #0ea5e9)", // teal -> sky
+  "linear-gradient(135deg, #f97316, #db2777)", // orange -> pink
+];
+
 /**
- * Get a random color (for avatars, tags, etc.)
- * @returns {string} Hex color code
+ * Pick an avatar background for someone without a picture. The same seed
+ * (e.g. their id or name) always gives the same colour, so a person's
+ * initials don't change colour every time the page re-renders.
+ * @param {string|number} seed
+ * @returns {string} A CSS background value
  */
-export const getRandomColor = () => {
-  const colors = [
-    "#FF6B6B",
-    "#4ECDC4",
-    "#45B7D1",
-    "#96CEB4",
-    "#FFEAA7",
-    "#DDA0DD",
-    "#98D8C8",
-    "#F7DC6F",
-    "#BB8FCE",
-    "#85C1E9",
-    "#F8C471",
-    "#82E0AA",
-    "#F1948A",
-    "#85929E",
-    "#73C6B6",
-  ];
-  return colors[Math.floor(Math.random() * colors.length)];
+export const getAvatarColor = (seed) => {
+  const str = String(seed ?? "");
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash * 31 + str.charCodeAt(i)) | 0;
+  }
+  return AVATAR_GRADIENTS[Math.abs(hash) % AVATAR_GRADIENTS.length];
 };
 
 /**

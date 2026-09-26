@@ -87,6 +87,9 @@ func (wsh *WebSocketHandler) GetChats(w http.ResponseWriter, r *http.Request) {
 			"last_message":    lastMessage.String,
 			"last_message_at": lastMessageAt.Time,
 			"unread_count":    unreadCount,
+			// Everyone in this list has a follow link with the viewer
+			// (see the query above), the same rule presence uses.
+			"online": wsh.Hub.IsUserOnline(otherUserID),
 		})
 	}
 
@@ -214,11 +217,11 @@ func (wsh *WebSocketHandler) SendMessage(w http.ResponseWriter, r *http.Request)
 	// The permission check, save, and broadcast are shared with the
 	// WebSocket "chat" message path (see websocket.SendPrivateMessage) so
 	// the two can't drift out of sync on who's allowed to message whom or
-	// what a message payload looks like. sendAck is false here because
-	// this handler's own HTTP response already confirms delivery to the
-	// caller - the WebSocket path additionally broadcasts an "ack" event
-	// because the sender there is a live connection waiting for one.
-	sent, err := websocket.SendPrivateMessage(wsh.DB, wsh.Hub, userID, req.RecipientID, req.Content, false)
+	// what a message payload looks like. This handler's own HTTP response
+	// confirms delivery to the caller - the WebSocket path additionally
+	// sends an "ack" event, because the sender there is a live connection
+	// waiting for one.
+	sent, err := websocket.SendPrivateMessage(wsh.DB, wsh.Hub, userID, req.RecipientID, req.Content)
 	if err != nil {
 		if err == websocket.ErrNotAllowed {
 			writeJSONError(w, http.StatusForbidden, "Cannot message this user")

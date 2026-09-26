@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { createSocketConnection } from "@/lib/socketConnection";
 
 const WebSocketContext = createContext(null);
 
@@ -23,89 +24,40 @@ const WebSocketContext = createContext(null);
 // call subscribe(type, handler) to receive just the events they care about.
 export function WebSocketProvider({ children }) {
   const { user } = useAuth();
+  const userId = user?.id;
   const [isConnected, setIsConnected] = useState(false);
-  const wsRef = useRef(null);
+  const connectionRef = useRef(null);
   const listenersRef = useRef(new Map()); // event type -> Set<handler>
-  const reconnectTimerRef = useRef(null);
-  const reconnectDelayRef = useRef(1000);
-  const unmountingRef = useRef(false);
 
+  // Keyed on the user's id, not the user object: the object is replaced
+  // after login and on every profile save, and each replacement used to
+  // tear down and reopen the socket. All connection state (including
+  // whether it's been closed) lives inside createSocketConnection, per
+  // connection - see lib/socketConnection.js for the duplicate-socket bug
+  // this replaced.
   useEffect(() => {
-    if (!user) {
-      return;
-    }
+    if (!userId) return;
 
-    unmountingRef.current = false;
-
-    const connect = () => {
-      const ws = new WebSocket("ws://localhost:8081/ws");
-      wsRef.current = ws;
-
-      ws.onopen = () => {
-        setIsConnected(true);
-        reconnectDelayRef.current = 1000; // back to the short delay once healthy
-      };
-
-      ws.onmessage = (event) => {
-        let envelope;
-        try {
-          envelope = JSON.parse(event.data);
-        } catch (error) {
-          console.error("Error parsing WebSocket message:", error);
-          return;
-        }
-
+    const connection = createSocketConnection({
+      url: "ws://localhost:8081/ws",
+      onStatusChange: setIsConnected,
+      onMessage: (envelope) => {
         const handlers = listenersRef.current.get(envelope.type);
         if (handlers) {
           handlers.forEach((handler) => handler(envelope.data));
         }
-      };
-
-      ws.onclose = () => {
-        setIsConnected(false);
-        if (unmountingRef.current) return;
-        // Reconnect with exponential backoff (capped at 30s) instead of
-        // leaving the app silently offline until the next page visit.
-        const maxReconnectDelay = 30000;
-        reconnectTimerRef.current = setTimeout(() => {
-          reconnectDelayRef.current = Math.min(
-            reconnectDelayRef.current * 2,
-            maxReconnectDelay,
-          );
-          connect();
-        }, reconnectDelayRef.current);
-      };
-
-      ws.onerror = (error) => {
-        console.error("WebSocket error:", error);
-      };
-    };
-
-    connect();
+      },
+    });
+    connectionRef.current = connection;
 
     return () => {
-      unmountingRef.current = true;
-      clearTimeout(reconnectTimerRef.current);
-      const ws = wsRef.current;
-      if (ws) {
-        if (ws.readyState === WebSocket.CONNECTING) {
-          // Closing mid-handshake logs a "closed before connection
-          // established" warning; wait for it to open, then close it.
-          ws.addEventListener("open", () => ws.close(), { once: true });
-        } else {
-          ws.close();
-        }
-      }
-      wsRef.current = null;
-      setIsConnected(false);
+      connection.close();
+      if (connectionRef.current === connection) connectionRef.current = null;
     };
-  }, [user]);
+  }, [userId]);
 
   const send = useCallback((message) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
-    ws.send(JSON.stringify(message));
-    return true;
+    return connectionRef.current ? connectionRef.current.send(message) : false;
   }, []);
 
   // Registers handler for events of the given type. Returns an unsubscribe

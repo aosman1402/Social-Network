@@ -12,6 +12,13 @@ type Hub struct {
     Unregister chan *Client
     Broadcast  chan []byte
     mutex      sync.RWMutex
+
+    // OnPresenceChange, if set, is called (in its own goroutine, never
+    // while the hub is locked) when a user's first connection opens or
+    // their last one closes - i.e. when they come online or go offline.
+    // It should read the current state with IsUserOnline rather than
+    // assume one, since two quick changes can run in either order.
+    OnPresenceChange func(userID int64)
 }
 
 func NewHub() *Hub {
@@ -33,12 +40,17 @@ func (h *Hub) Run() {
             
             // Add to user room - FIXED: use strconv.FormatInt
             userRoom := "user_" + strconv.FormatInt(client.UserID, 10)
+            cameOnline := len(h.Rooms[userRoom]) == 0
             if h.Rooms[userRoom] == nil {
                 h.Rooms[userRoom] = make(map[*Client]bool)
             }
             h.Rooms[userRoom][client] = true
             client.RoomID = userRoom
             h.mutex.Unlock()
+
+            if cameOnline {
+                h.presenceChanged(client.UserID)
+            }
 
         case client := <-h.Unregister:
             h.mutex.Lock()
@@ -83,9 +95,55 @@ func (h *Hub) removeClient(client *Client) {
             delete(roomClients, client)
             if len(roomClients) == 0 {
                 delete(h.Rooms, client.RoomID)
+                // That was the user's last open connection.
+                h.presenceChanged(client.UserID)
             }
         }
     }
+}
+
+// presenceChanged runs OnPresenceChange in its own goroutine, so it can
+// take the hub lock itself (e.g. via IsUserOnline) - callers may hold it.
+func (h *Hub) presenceChanged(userID int64) {
+    if h.OnPresenceChange != nil {
+        go h.OnPresenceChange(userID)
+    }
+}
+
+// DisconnectSession closes every connection opened with sessionToken. Used
+// on logout: a connection is only authenticated when it opens, so without
+// this another tab of the logged-out session would keep receiving that
+// user's messages and notifications. Returns how many were closed.
+func (h *Hub) DisconnectSession(sessionToken string) int {
+    if h == nil || sessionToken == "" {
+        return 0
+    }
+    return h.disconnectWhere(func(c *Client) bool { return c.SessionToken == sessionToken })
+}
+
+// DisconnectUser closes every connection userID has open, e.g. after a
+// password change signs out all of their sessions. Returns how many were
+// closed.
+func (h *Hub) DisconnectUser(userID int64) int {
+    if h == nil {
+        return 0
+    }
+    return h.disconnectWhere(func(c *Client) bool { return c.UserID == userID })
+}
+
+func (h *Hub) disconnectWhere(match func(*Client) bool) int {
+    h.mutex.Lock()
+    defer h.mutex.Unlock()
+    n := 0
+    for client := range h.Clients {
+        if match(client) {
+            // Closing Send makes WritePump send a close frame and close
+            // the socket, which in turn ends ReadPump.
+            h.removeClient(client)
+            n++
+        }
+    }
+    return n
 }
 
 func (h *Hub) BroadcastToRoom(roomID string, message []byte) {

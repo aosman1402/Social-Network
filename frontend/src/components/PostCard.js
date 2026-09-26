@@ -8,6 +8,7 @@ import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import { useWebSocket } from "@/context/WebSocketContext";
 import PrivacyBadge from "@/components/PrivacyBadge";
+import DeleteButton from "@/components/DeleteButton";
 
 export default function PostCard({
   post,
@@ -15,6 +16,10 @@ export default function PostCard({
   highlighted = false,
   autoOpenComments = false,
   highlightCommentId = null,
+  // "Pin" is a Home-feed feature: only the Home page turns it on, and it
+  // tells the page when a post is pinned/unpinned so it can re-order.
+  showPin = false,
+  onPinChange,
 }) {
   const { user } = useAuth();
   const { subscribe } = useWebSocket();
@@ -174,7 +179,8 @@ export default function PostCard({
     }
   };
 
-  const handleSave = async () => {
+  // Pin / unpin (stored server-side as a per-user "saved" post).
+  const handlePin = async () => {
     try {
       const { ok, data } = await apiFetch(`/post/save?id=${post.id}`, {
         method: "POST",
@@ -182,13 +188,14 @@ export default function PostCard({
 
       if (ok) {
         setSaved(data.saved);
-        toast.success(data.message);
+        onPinChange?.(post.id, data.saved);
+        toast.success(data.saved ? "Pinned to the top of your Home feed" : "Unpinned");
       } else {
-        toast.error("Failed to save/unsave post");
+        toast.error("Failed to pin post");
       }
     } catch (error) {
-      console.error("Error saving post:", error);
-      toast.error("Failed to save post");
+      console.error("Error pinning post:", error);
+      toast.error("Failed to pin post");
     }
   };
 
@@ -226,7 +233,7 @@ export default function PostCard({
   return (
     <div
       id={`post-${post.id}`}
-      className={`bg-white rounded-lg shadow p-4 mb-4 transition-shadow ${
+      className={`post-card ${showPin && saved ? "post-card--pinned" : ""} bg-white rounded-lg shadow p-4 mb-4 transition-shadow ${
         highlighted ? "ring-2 ring-blue-400" : ""
       }`}>
       {/* Post Header */}
@@ -252,11 +259,7 @@ export default function PostCard({
           </div>
         </div>
         {isOwnPost && (
-          <button
-            onClick={handleDelete}
-            className='text-gray-400 hover:text-red-500'>
-            ×
-          </button>
+          <DeleteButton onClick={handleDelete} label='Delete post' />
         )}
       </div>
 
@@ -277,35 +280,51 @@ export default function PostCard({
         </div>
       )}
 
-      {/* ✅ Post Actions */}
-      <div className='flex items-center space-x-6 mt-3 pt-3 border-t'>
-        {/* Like Button */}
+      {/* Post Actions */}
+      <div className='post-actions'>
         <button
+          type='button'
           onClick={handleLike}
-          className={`flex items-center space-x-1 text-sm transition ${
-            liked ? "text-red-500" : "text-gray-500 hover:text-red-500"
-          }`}>
-          <span>{liked ? "❤️" : "🤍"}</span>
-          <span className='font-medium'>{likeCount}</span>
+          aria-pressed={liked}
+          title={liked ? "Unlike" : "Like"}
+          className={`post-action post-action--like ${liked ? "is-on" : ""}`}>
+          <svg className='post-action-icon' viewBox='0 0 24 24' width='18' height='18' aria-hidden='true'
+            fill={liked ? "currentColor" : "none"} stroke='currentColor' strokeWidth='2' strokeLinejoin='round'>
+            <path d='M12 20.5s-7.5-4.6-9.3-9.2C1.4 7.9 3.6 4.5 7 4.5c2 0 3.4 1.1 5 3 1.6-1.9 3-3 5-3 3.4 0 5.6 3.4 4.3 6.8-1.8 4.6-9.3 9.2-9.3 9.2z' />
+          </svg>
+          <span className='post-action-label'>{liked ? "Liked" : "Like"}</span>
+          <span className='post-action-count'>{likeCount}</span>
         </button>
 
-        {/* Comment Button */}
         <button
+          type='button'
           onClick={toggleComments}
-          className='flex items-center space-x-1 text-sm text-gray-500 hover:text-blue-500 transition'>
-          <span>💬</span>
-          <span>{Math.max(post.comment_count || 0, comments.length)}</span>
+          aria-expanded={showComments}
+          title={showComments ? "Hide comments" : "Show comments"}
+          className={`post-action post-action--comment ${showComments ? "is-on" : ""}`}>
+          <svg className='post-action-icon' viewBox='0 0 24 24' width='18' height='18' aria-hidden='true'
+            fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+            <path d='M21 12a8 8 0 0 1-11.6 7.1L4 20.5l1.4-4.6A8 8 0 1 1 21 12z' />
+          </svg>
+          <span className='post-action-label'>Comment</span>
+          <span className='post-action-count'>{Math.max(post.comment_count || 0, comments.length)}</span>
         </button>
 
-        {/* Save Button */}
-        <button
-          onClick={handleSave}
-          className={`flex items-center space-x-1 text-sm transition ${
-            saved ? "text-blue-500" : "text-gray-500 hover:text-blue-500"
-          }`}>
-          <span>📌</span>
-          <span>{saved ? "Saved" : "Save"}</span>
-        </button>
+        {showPin && (
+          <button
+            type='button'
+            onClick={handlePin}
+            aria-pressed={saved}
+            title={saved ? "Unpin from the top of your feed" : "Pin to the top of your feed"}
+            className={`post-action post-action--pin ${saved ? "is-on" : ""}`}>
+            <svg className='post-action-icon' viewBox='0 0 24 24' width='18' height='18' aria-hidden='true'
+              fill={saved ? "currentColor" : "none"} stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round'>
+              <path d='M9 3.5h6l-1 5.5 3.5 3.5v2h-11v-2L10 9z' />
+              <path d='M12 14.5v6' />
+            </svg>
+            <span className='post-action-label'>{saved ? "Pinned" : "Pin"}</span>
+          </button>
+        )}
       </div>
 
       {/* Comments Section */}

@@ -136,12 +136,17 @@ export default function Navbar() {
     if (!user) return;
     return subscribe("chat", (msg) => {
       if (msg.sender_id === user.id) return; // our own message, echoed
-      if (pathname === `/chat/${msg.sender_id}`) return; // already visible
+      if (msg.group_id) {
+        // Group chat is shown inline on the group's own page.
+        if (pathname === `/groups/${msg.group_id}`) return;
+      } else if (pathname === `/chat/${msg.sender_id}`) {
+        return; // already visible
+      }
 
       const name = msg.sender
         ? `${msg.sender.first_name} ${msg.sender.last_name}`.trim()
         : "Someone";
-      toast.success(`${name}: ${msg.content}`);
+      toast.success(`${name}${msg.group_id ? " (group)" : ""}: ${msg.content}`);
     });
   }, [subscribe, user, pathname]);
 
@@ -198,8 +203,9 @@ export default function Navbar() {
     return (
       <nav className='navbar'>
         <div className='navbar-inner'>
-          <Link href='/' className='navbar-brand'>
-            Social Network for Studies
+          <Link href='/' className='navbar-brand' aria-label='Social Network for Studies - home'>
+            <span className='navbar-logo' aria-hidden='true'>🎓</span>
+            <span className='navbar-brand-text'>Social Network for Studies</span>
           </Link>
           <span className='navbar-loading'>Loading...</span>
         </div>
@@ -212,8 +218,9 @@ export default function Navbar() {
   return (
     <nav className='navbar'>
       <div className='navbar-inner'>
-        <Link href='/' className='navbar-brand'>
-          Social Network for Studies
+        <Link href='/' className='navbar-brand' aria-label='Social Network for Studies - home'>
+          <span className='navbar-logo' aria-hidden='true'>🎓</span>
+          <span className='navbar-brand-text'>Social Network for Studies</span>
         </Link>
 
         {user ? (
@@ -232,9 +239,11 @@ export default function Navbar() {
                 <Link
                   key={href}
                   href={href}
+                  title={label}
+                  aria-current={isActive(pathname) ? "page" : undefined}
                   className={`navbar-link ${isActive(pathname) ? "navbar-link--active" : ""}`}>
                   <Icon size={18} />
-                  <span>{label}</span>
+                  <span className='navbar-link-label'>{label}</span>
                   {href === "/chat" && chatUnread > 0 && (
                     <span
                       className='navbar-link-badge'

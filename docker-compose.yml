@@ -6,6 +6,12 @@ services:
     volumes:
       - backend-db:/app/pkg/db/sqlite
       - backend-uploads:/app/uploads
+    environment:
+      # Optional "Login with GitHub" keys. Compose reads them from your
+      # shell or from a .env file next to this file (gitignored - see
+      # .env.example). Left empty, GitHub login is simply switched off.
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
     restart: unless-stopped
 
   frontend:

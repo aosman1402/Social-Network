@@ -104,6 +104,34 @@ function HomeFeed() {
     setPosts(posts.filter((p) => p.id !== postId));
   };
 
+  // Pinned posts (the viewer's own pins) stay at the top of the feed.
+  const handlePinChange = (postId, pinned) => {
+    setPosts((prev) => prev.map((p) => (p.id === postId ? { ...p, is_saved: pinned } : p)));
+  };
+  const pinnedPosts = posts.filter((p) => p.is_saved);
+  const otherPosts = posts.filter((p) => !p.is_saved);
+
+  const renderPost = (post) => (
+    <PostCard
+      key={post.id}
+      post={post}
+      onDelete={handlePostDeleted}
+      showPin
+      onPinChange={handlePinChange}
+      highlighted={highlightedPostId === post.id}
+      autoOpenComments={
+        !!targetCommentId && targetPostId
+          ? post.id === parseInt(targetPostId, 10)
+          : false
+      }
+      highlightCommentId={
+        targetCommentId && post.id === parseInt(targetPostId, 10)
+          ? parseInt(targetCommentId, 10)
+          : null
+      }
+    />
+  );
+
   if (loading) {
     return (
       <div className='flex justify-center items-center h-64'>
@@ -127,24 +155,16 @@ function HomeFeed() {
             <p className='text-sm text-gray-400 mt-2'>Be the first to post!</p>
           </div>
         ) : (
-          posts.map((post) => (
-            <PostCard
-              key={post.id}
-              post={post}
-              onDelete={handlePostDeleted}
-              highlighted={highlightedPostId === post.id}
-              autoOpenComments={
-                !!targetCommentId && targetPostId
-                  ? post.id === parseInt(targetPostId, 10)
-                  : false
-              }
-              highlightCommentId={
-                targetCommentId && post.id === parseInt(targetPostId, 10)
-                  ? parseInt(targetCommentId, 10)
-                  : null
-              }
-            />
-          ))
+          <>
+            {pinnedPosts.length > 0 && (
+              <h2 className='feed-section-title'>📌 Pinned</h2>
+            )}
+            {pinnedPosts.map(renderPost)}
+            {pinnedPosts.length > 0 && otherPosts.length > 0 && (
+              <h2 className='feed-section-title'>Latest posts</h2>
+            )}
+            {otherPosts.map(renderPost)}
+          </>
         )}
       </div>
     </div>

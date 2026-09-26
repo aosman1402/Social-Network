@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"log"
 	"strconv"
 	"time"
 )
@@ -43,11 +44,10 @@ type SentPrivateMessage struct {
 // already drifted (only one of the two sent a delivery "ack", and they
 // serialized slightly different sender fields).
 //
-// sendAck additionally broadcasts an "ack" event to the sender's own room,
-// which the WebSocket path wants (the sender is a live connection waiting
-// for delivery confirmation) and the HTTP path doesn't (its own response
-// already is the confirmation).
-func SendPrivateMessage(db *sql.DB, hub *Hub, senderID, recipientID int64, content string, sendAck bool) (*SentPrivateMessage, error) {
+// The WebSocket path sends the sender its own "ack" (see client.go), since
+// only it knows the client's temporary id; the HTTP path's response is
+// already the confirmation.
+func SendPrivateMessage(db *sql.DB, hub *Hub, senderID, recipientID int64, content string) (*SentPrivateMessage, error) {
 	allowed, err := CanDirectMessage(db, senderID, recipientID)
 	if err != nil {
 		return nil, err
@@ -56,22 +56,18 @@ func SendPrivateMessage(db *sql.DB, hub *Hub, senderID, recipientID int64, conte
 		return nil, ErrNotAllowed
 	}
 
+	createdAt := time.Now()
 	result, err := db.Exec(
 		`INSERT INTO messages (sender_id, recipient_id, content, is_group_message, created_at)
          VALUES (?, ?, ?, ?, ?)`,
-		senderID, recipientID, content, false, time.Now(),
+		senderID, recipientID, content, false, createdAt,
 	)
 	if err != nil {
 		return nil, err
 	}
 	messageID, _ := result.LastInsertId()
-	createdAt := time.Now()
 
-	var sender SenderInfo
-	db.QueryRow(
-		`SELECT id, email, first_name, last_name, nickname, avatar_path FROM users WHERE id = ?`,
-		senderID,
-	).Scan(&sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.Avatar)
+	sender := loadSenderInfo(db, senderID)
 
 	msg := map[string]interface{}{
 		"id":           messageID,
@@ -83,14 +79,24 @@ func SendPrivateMessage(db *sql.DB, hub *Hub, senderID, recipientID int64, conte
 	}
 	broadcastEvent(hub, "user_"+strconv.FormatInt(recipientID, 10), "chat", msg)
 
-	if sendAck {
-		broadcastEvent(hub, "user_"+strconv.FormatInt(senderID, 10), "ack", map[string]interface{}{
-			"message":    "sent",
-			"message_id": messageID,
-		})
-	}
-
 	return &SentPrivateMessage{MessageID: messageID, CreatedAt: createdAt, Sender: sender}, nil
+}
+
+// loadSenderInfo fetches the profile fields attached to an outgoing chat
+// message. nickname and avatar_path are nullable, and scanning a NULL into
+// a plain string fails the whole Scan - which used to send every message
+// from a user without a nickname with an empty sender - so both are
+// COALESCEd to "".
+func loadSenderInfo(db *sql.DB, userID int64) SenderInfo {
+	var sender SenderInfo
+	if err := db.QueryRow(
+		`SELECT id, email, first_name, last_name, COALESCE(nickname, ''), COALESCE(avatar_path, '')
+         FROM users WHERE id = ?`,
+		userID,
+	).Scan(&sender.ID, &sender.Email, &sender.FirstName, &sender.LastName, &sender.Nickname, &sender.Avatar); err != nil {
+		log.Printf("Failed to load sender %d: %v", userID, err)
+	}
+	return sender
 }
 
 // CanDirectMessage reports whether senderID may send recipientID a direct

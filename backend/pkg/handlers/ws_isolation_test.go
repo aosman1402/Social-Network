@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -22,8 +23,18 @@ type wsTestEnv struct {
 
 func newWSTestEnv(t *testing.T) *wsTestEnv {
 	t.Helper()
+	return newWSTestEnvWith(t, nil)
+}
+
+// newWSTestEnvWith is newWSTestEnv with a chance to configure the hub
+// (e.g. EnablePresence) before it starts running.
+func newWSTestEnvWith(t *testing.T, setup func(*websocket.Hub, *sql.DB)) *wsTestEnv {
+	t.Helper()
 	db := newTestDB(t)
 	hub := websocket.NewHub()
+	if setup != nil {
+		setup(hub, db)
+	}
 	go hub.Run()
 	wsh := &WebSocketHandler{DB: db, Hub: hub}
 	server := httptest.NewServer(http.HandlerFunc(wsh.HandleWebSocket))
@@ -85,7 +96,7 @@ func TestJoinRoomCannotEavesdrop(t *testing.T) {
 	writeFrame(t, eveConn, map[string]interface{}{"type": "join_room", "room_id": "user_" + itoa(aliceID)})
 	time.Sleep(100 * time.Millisecond)
 
-	if _, err := websocket.SendPrivateMessage(env.wsh.DB, env.wsh.Hub, bobID, aliceID, "secret for alice", false); err != nil {
+	if _, err := websocket.SendPrivateMessage(env.wsh.DB, env.wsh.Hub, bobID, aliceID, "secret for alice"); err != nil {
 		t.Fatalf("SendPrivateMessage: %v", err)
 	}
 

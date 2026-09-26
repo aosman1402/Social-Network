@@ -6,6 +6,8 @@ import {
   getInitials,
   getAvatarSrc,
   debounce,
+  getNotificationTarget,
+  getAvatarColor,
 } from "./helpers";
 
 describe("isValidEmail", () => {
@@ -136,5 +138,42 @@ describe("debounce", () => {
 
     expect(fn).toHaveBeenCalledTimes(1);
     expect(fn).toHaveBeenCalledWith("third");
+  });
+});
+
+describe("getNotificationTarget - group notifications", () => {
+  // Answered join requests / invitations open the group itself. Only event
+  // notifications jump to its Events section - a non-member (e.g. someone
+  // whose request was declined) has no Events section to jump to.
+  test.each([
+    "group_request",
+    "group_request_accepted",
+    "group_request_declined",
+    "group_invitation",
+    "group_invitation_accepted",
+    "group_invitation_declined",
+  ])("%s opens the group", (type) => {
+    expect(getNotificationTarget({ type, related_id: 7 }, 1)).toBe("/groups/7");
+  });
+
+  test("event_created opens the group's Events section", () => {
+    expect(getNotificationTarget({ type: "event_created", related_id: 7 }, 1)).toBe("/groups/7#events");
+  });
+});
+
+describe("getAvatarColor", () => {
+  test("the same person always gets the same colour", () => {
+    expect(getAvatarColor(42)).toBe(getAvatarColor(42));
+    expect(getAvatarColor("Alice")).toBe(getAvatarColor("Alice"));
+  });
+
+  test("returns a gradient, even with no seed", () => {
+    expect(getAvatarColor(7)).toMatch(/^linear-gradient\(/);
+    expect(getAvatarColor(undefined)).toMatch(/^linear-gradient\(/);
+  });
+
+  test("spreads different people across colours", () => {
+    const colours = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(getAvatarColor));
+    expect(colours.size).toBeGreaterThan(3);
   });
 });

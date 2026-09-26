@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import { getAvatarColor } from "@/utils/helpers";
 
 export default function GroupsPage() {
-  const router = useRouter();
   const { user } = useRequireAuth();
 
   // ---- Create-group form state ------------------------------------------
@@ -30,6 +29,7 @@ export default function GroupsPage() {
   // ---- Groups list ------------------------------------------------------
   const [groups, setGroups] = useState([]);
   const [loadingGroups, setLoadingGroups] = useState(true);
+  const [filter, setFilter] = useState("all"); // all | mine | invites
 
   const fetchGroups = async () => {
     const { ok, data } = await apiFetch("/groups");
@@ -178,19 +178,56 @@ export default function GroupsPage() {
   };
 
   // ---- Render -----------------------------------------------------------
+  const myGroups = groups.filter((g) => g.is_member);
+  const invitations = groups.filter((g) => g.is_invited);
+  const shown = filter === "mine" ? myGroups : filter === "invites" ? invitations : groups;
+  const tabs = [
+    { key: "all", label: "All groups", count: groups.length },
+    { key: "mine", label: "My groups", count: myGroups.length },
+    ...(invitations.length > 0 ? [{ key: "invites", label: "Invitations", count: invitations.length }] : []),
+  ];
+
+  // What the viewer's relationship to a group is, for the card's badge.
+  const groupStatus = (g) => {
+    if (g.creator_id === user?.id) return { label: "★ Creator", tone: "creator" };
+    if (g.is_member) return { label: "✓ Member", tone: "member" };
+    if (g.is_invited) return { label: "✉ Invited", tone: "invited" };
+    if (g.has_pending_request) return { label: "⏳ Requested", tone: "pending" };
+    return { label: "Join →", tone: "join" };
+  };
+
   return (
     <div className='groups-page'>
-      <div className='groups-header'>
-        <h1 className='groups-title'>Groups</h1>
-        <button
-          type='button'
-          onClick={() => router.back()}
-          className='groups-cancel'>
-          Cancel
-        </button>
-      </div>
+      {/* ---- Hero ---- */}
+      <header className='groups-hero'>
+        <div className='groups-hero-text'>
+          <h1 className='groups-title'>Groups</h1>
+          <p className='groups-subtitle'>
+            Find your people - join a group, or start your own and invite your followers.
+          </p>
+          <div className='groups-hero-stats'>
+            <span className='groups-hero-chip'>👥 {groups.length} groups</span>
+            <span className='groups-hero-chip'>✓ You&apos;re in {myGroups.length}</span>
+            {invitations.length > 0 && (
+              <span className='groups-hero-chip groups-hero-chip--alert'>
+                ✉ {invitations.length} invitation{invitations.length === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+        </div>
+      </header>
 
+      <div className='groups-layout'>
+      {/* ---- Create a group ---- */}
       <form onSubmit={handleCreateGroup} className='groups-form'>
+        <div className='groups-form-head'>
+          <span className='groups-form-icon' aria-hidden='true'>＋</span>
+          <div>
+            <h2 className='groups-form-title'>Create a group</h2>
+            <p className='groups-form-hint'>Give it a name, then invite followers.</p>
+          </div>
+        </div>
+
         <input
           type='text'
           placeholder='Group Title *'
@@ -302,29 +339,66 @@ export default function GroupsPage() {
       </form>
 
       {/* ---- Groups list ---- */}
-      <div className='groups-list-section'>
-        <h2 className='groups-list-title'>All Groups</h2>
+      <section className='groups-list-section'>
+        <div className='groups-tabs' role='tablist'>
+          {tabs.map((t) => (
+            <button
+              key={t.key}
+              type='button'
+              role='tab'
+              aria-selected={filter === t.key}
+              onClick={() => setFilter(t.key)}
+              className={`groups-tab ${filter === t.key ? "groups-tab--active" : ""}`}>
+              {t.label}
+              <span className='groups-tab-count'>{t.count}</span>
+            </button>
+          ))}
+        </div>
+
         {loadingGroups ? (
           <div className='groups-loading'>Loading…</div>
-        ) : groups.length === 0 ? (
+        ) : shown.length === 0 ? (
           <div className='groups-empty'>
-            No groups yet. Create the first one!
+            {filter === "mine"
+              ? "You're not in any groups yet - join one, or create your own."
+              : filter === "invites"
+                ? "No invitations right now."
+                : "No groups yet. Create the first one!"}
           </div>
         ) : (
           <div className='groups-list'>
-            {groups.map((g) => (
-              <Link key={g.id} href={`/groups/${g.id}`} className='groups-card'>
-                <h3 className='groups-card-title'>{g.title}</h3>
-                {g.description && (
-                  <p className='groups-card-desc'>{g.description}</p>
-                )}
-                <div className='groups-card-meta'>
-                  <span>👥 {g.member_count ?? 0} members</span>
-                </div>
-              </Link>
-            ))}
+            {shown.map((g) => {
+              const status = groupStatus(g);
+              return (
+                <Link key={g.id} href={`/groups/${g.id}`} className='groups-card'>
+                  <div className='groups-card-top'>
+                    <span
+                      className='groups-card-icon'
+                      style={{ background: getAvatarColor(`group-${g.id}`) }}
+                      aria-hidden='true'>
+                      {g.title?.trim()?.[0]?.toUpperCase() || "G"}
+                    </span>
+                    <div className='groups-card-heading'>
+                      <h3 className='groups-card-title'>{g.title}</h3>
+                      <span className={`groups-status groups-status--${status.tone}`}>
+                        {status.label}
+                      </span>
+                    </div>
+                  </div>
+                  <p className='groups-card-desc'>
+                    {g.description || "No description yet."}
+                  </p>
+                  <div className='groups-card-meta'>
+                    <span className='groups-card-pill'>
+                      👥 {g.member_count ?? 0} member{(g.member_count ?? 0) === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                </Link>
+              );
+            })}
           </div>
         )}
+      </section>
       </div>
     </div>
   );
