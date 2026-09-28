@@ -99,3 +99,6 @@ Thumbs.db
 *.cert
 *.p12
 *.pfx
+
+# Audit answers - tracked even though the global gitignore excludes *.md
+!AUDIT.md

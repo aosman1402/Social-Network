@@ -306,7 +306,7 @@ func (uh *UserHandler) HandleFollowRequest(w http.ResponseWriter, r *http.Reques
     }
 
     json.NewEncoder(w).Encode(map[string]string{
-        "message": "Follow request " + req.Action + "ed",
+        "message": "Follow request " + status,
     })
 }
 

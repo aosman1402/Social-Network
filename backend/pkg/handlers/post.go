@@ -48,6 +48,10 @@ func (ph *PostHandler) CreatePost(w http.ResponseWriter, r *http.Request) {
     if privacyLevel == "" {
         privacyLevel = "public"
     }
+    if !isValidPrivacyLevel(privacyLevel) {
+        writeJSONError(w, http.StatusBadRequest, "Invalid privacy level. Must be 'public', 'almost_private' or 'private'")
+        return
+    }
 
     var groupID *int64
     if groupIDStr != "" {
@@ -352,6 +356,10 @@ func (ph *PostHandler) UpdatePost(w http.ResponseWriter, r *http.Request) {
 
     if privacyLevel == "" {
         privacyLevel = "public"
+    }
+    if !isValidPrivacyLevel(privacyLevel) {
+        writeJSONError(w, http.StatusBadRequest, "Invalid privacy level. Must be 'public', 'almost_private' or 'private'")
+        return
     }
 
     // Handle image update

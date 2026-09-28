@@ -117,9 +117,6 @@ export default function LoginPage() {
           </button>
         </form>
 
-        <div className='auth-divider'>
-          <span>or</span>
-        </div>
         <GitHubLoginButton />
 
         <p className='text-center mt-4 text-sm'>

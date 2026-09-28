@@ -508,6 +508,7 @@ func (g *GitHubOAuth) Complete(w http.ResponseWriter, r *http.Request) {
 	if req.AboutMe != nil && strings.TrimSpace(*req.AboutMe) == "" {
 		req.AboutMe = nil
 	}
+	p.Email = normalizeEmail(p.Email)
 	if taken, err := ah.emailTaken(p.Email); err != nil || taken {
 		writeJSONError(w, http.StatusConflict, "An account with this email already exists - log in with your password")
 		return

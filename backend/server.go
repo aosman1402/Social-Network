@@ -75,9 +75,15 @@ func main() {
 	// Initialize middleware
 	authMiddleware := &middleware.AuthMiddleware{DB: db.DB}
 
-	// At most 5 login attempts per minute per client IP, to slow down
-	// password brute-forcing.
-	loginRateLimiter := middleware.NewRateLimiter(5, time.Minute)
+	// At most 10 failed logins per minute per client IP, to slow down
+	// password guessing from one machine (including one password tried
+	// against many accounts). Successful logins don't count. Guessing one
+	// account from many IPs is handled per account inside Login.
+	loginRateLimiter := middleware.NewRateLimiter(10, time.Minute)
+
+	// At most 20 registrations per minute per client IP, so /register can't
+	// be used to create accounts in bulk or to test lots of emails quickly.
+	registerRateLimiter := middleware.NewRateLimiter(20, time.Minute)
 
 	// Serve static files (uploads)
 	http.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir("./uploads"))))
@@ -114,11 +120,11 @@ func main() {
 	}))
 
 	// Auth routes
-	http.HandleFunc("/api/register", cors(authHandler.Register))
+	http.HandleFunc("/api/register", cors(registerRateLimiter.Limit(authHandler.Register)))
 	// check-nickname is public too, for the same reason as check-auth below -
 	// it's used while filling out the registration form, before a session exists.
 	http.HandleFunc("/api/check-nickname", cors(authHandler.CheckNickname))
-	http.HandleFunc("/api/login", cors(loginRateLimiter.Limit(authHandler.Login)))
+	http.HandleFunc("/api/login", cors(loginRateLimiter.LimitFailures(http.StatusUnauthorized, authHandler.Login)))
 	http.HandleFunc("/api/logout", cors(authMiddleware.Authenticate(authHandler.Logout)))
 	http.HandleFunc("/api/user/password", cors(authMiddleware.Authenticate(authHandler.ChangePassword)))
 	// check-auth is intentionally not wrapped in authMiddleware: an

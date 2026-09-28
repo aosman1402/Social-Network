@@ -31,7 +31,6 @@ export default function RegisterPage() {
   const [errors, setErrors] = useState({});
   const [isLoading, setIsLoading] = useState(false);
   const [serverError, setServerError] = useState("");
-  const [debugInfo, setDebugInfo] = useState("");
 
   // Avatar/Image (Optional): "none" | "dicebear" | "upload"
   const [avatarChoice, setAvatarChoice] = useState("none");
@@ -47,7 +46,6 @@ export default function RegisterPage() {
     setFormData((prev) => ({ ...prev, nickname: value }));
     if (errors.nickname) setErrors((prev) => ({ ...prev, nickname: "" }));
     setServerError("");
-    setDebugInfo("");
   };
 
   const handleAvatarFileChange = (file, previewUrl, errorMsg) => {
@@ -91,7 +89,6 @@ export default function RegisterPage() {
     setFormData({ ...formData, [name]: value });
     if (errors[name]) setErrors({ ...errors, [name]: "" });
     setServerError("");
-    setDebugInfo("");
   };
 
   const handleSubmit = async (e) => {
@@ -100,7 +97,6 @@ export default function RegisterPage() {
 
     setIsLoading(true);
     setServerError("");
-    setDebugInfo("");
 
     try {
       // The date input's value is already "YYYY-MM-DD" - no parsing needed.
@@ -119,29 +115,17 @@ export default function RegisterPage() {
         avatar_path: avatarChoice === "dicebear" ? dicebearUrl : null,
       };
 
-      setDebugInfo("1. Sending registration request...");
-      console.log("Sending registration:", payload);
-
-      const { ok, status, data } = await apiFetch("/register", {
+      const { ok, data } = await apiFetch("/register", {
         method: "POST",
         json: payload,
       });
-
-      setDebugInfo(`2. Registration response status: ${status}`);
-      console.log("Registration response status:", status);
-      setDebugInfo(`3. Registration response: ${JSON.stringify(data)}`);
-      console.log("Registration response:", data);
 
       if (!ok) {
         throw new Error(data.message || data.error || "Registration failed");
       }
 
-      setDebugInfo("4. Registration successful! Auto-logging in...");
-      console.log("Registration successful! Auto-logging in...");
-
       // ✅ Try to auto-login
       const loginResult = await login(formData.email, formData.password);
-      console.log("Auto-login result:", loginResult);
 
       if (loginResult.success) {
         // The account (and its session) now exist, so an uploaded avatar can
@@ -177,12 +161,9 @@ export default function RegisterPage() {
           }
         }
 
-        setDebugInfo("5. Auto-login successful! Redirecting to home...");
-        console.log("Auto-login successful! Redirecting to home...");
         // Force redirect with window.location
         window.location.href = "/";
       } else {
-        setDebugInfo(`5. Auto-login failed: ${loginResult.error}`);
         console.error("Auto-login failed:", loginResult.error);
         // Fallback: redirect to login page
         router.push("/login?registered=true");
@@ -190,7 +171,6 @@ export default function RegisterPage() {
     } catch (error) {
       console.error("Registration error:", error);
       setServerError(error.message || "Registration failed. Please try again.");
-      setDebugInfo(`❌ Error: ${error.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -204,10 +184,11 @@ export default function RegisterPage() {
           <p className='text-gray-600 mt-2'>Join the social network</p>
         </div>
 
-        <GitHubLoginButton label='Sign up with GitHub' />
-        <div className='auth-divider'>
-          <span>or with your email</span>
-        </div>
+        <GitHubLoginButton
+          label='Sign up with GitHub'
+          divider='or with your email'
+          dividerPosition='after'
+        />
 
         {/* noValidate: the browser's own type="email" check would otherwise
             intercept submission before validateForm() runs, so its (less
@@ -393,12 +374,6 @@ export default function RegisterPage() {
               <p className='text-red-500 text-sm mt-1'>{avatarError}</p>
             )}
           </div>
-
-          {debugInfo && (
-            <div className='text-blue-500 text-xs text-center break-all'>
-              {debugInfo}
-            </div>
-          )}
 
           {serverError && (
             <div className='text-red-500 text-sm text-center'>

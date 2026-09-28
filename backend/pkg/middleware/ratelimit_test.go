@@ -143,3 +143,91 @@ func TestRateLimiter_RecordAndCheck(t *testing.T) {
 		t.Error("first attempt for a different key: RecordAndCheck = true, want false")
 	}
 }
+
+// TestRateLimiter_LimitFailures_OnlyCountsFailures covers the login limiter:
+// successful requests never count, so any number of them pass, while the
+// (max+1)th failed request from the same IP is blocked with 429 before
+// reaching the handler.
+func TestRateLimiter_LimitFailures_OnlyCountsFailures(t *testing.T) {
+	rl := NewRateLimiter(2, time.Minute)
+	status := http.StatusOK
+	calls := 0
+	handler := func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(status)
+	}
+	send := func() int {
+		r := httptest.NewRequest(http.MethodPost, "/api/login", nil)
+		r.RemoteAddr = "198.51.100.5:1111"
+		w := httptest.NewRecorder()
+		rl.LimitFailures(http.StatusUnauthorized, handler)(w, r)
+		return w.Code
+	}
+
+	for i := 0; i < 5; i++ {
+		if got := send(); got != http.StatusOK {
+			t.Fatalf("successful request %d: status = %d, want %d", i+1, got, http.StatusOK)
+		}
+	}
+
+	status = http.StatusUnauthorized
+	for i := 0; i < 2; i++ {
+		if got := send(); got != http.StatusUnauthorized {
+			t.Fatalf("failed request %d: status = %d, want %d", i+1, got, http.StatusUnauthorized)
+		}
+	}
+
+	callsBefore := calls
+	if got := send(); got != http.StatusTooManyRequests {
+		t.Errorf("request after 2 failures: status = %d, want %d", got, http.StatusTooManyRequests)
+	}
+	if calls != callsBefore {
+		t.Error("blocked request still reached the handler")
+	}
+}
+
+// TestRateLimiter_BlockedRecordReset covers the per-key helpers behind the
+// per-account login lockout: Blocked never records, Record counts towards
+// max, and Reset clears the key.
+func TestRateLimiter_BlockedRecordReset(t *testing.T) {
+	rl := NewRateLimiter(2, time.Minute)
+	key := "victim@example.com"
+
+	for i := 0; i < 5; i++ {
+		if rl.Blocked(key) {
+			t.Fatal("Blocked = true before anything was recorded (Blocked must not record)")
+		}
+	}
+
+	rl.Record(key)
+	if rl.Blocked(key) {
+		t.Error("Blocked = true after 1 of 2 attempts")
+	}
+	rl.Record(key)
+	if !rl.Blocked(key) {
+		t.Error("Blocked = false after reaching max")
+	}
+	if rl.Blocked("someone-else@example.com") {
+		t.Error("a different key was blocked")
+	}
+
+	rl.Reset(key)
+	if rl.Blocked(key) {
+		t.Error("Blocked = true after Reset")
+	}
+}
+
+// TestRateLimiter_Blocked_ExpiresWithWindow covers the lockout being
+// temporary: once the recorded attempts are older than the window, the key
+// is no longer blocked.
+func TestRateLimiter_Blocked_ExpiresWithWindow(t *testing.T) {
+	rl := NewRateLimiter(1, 50*time.Millisecond)
+	rl.Record("k")
+	if !rl.Blocked("k") {
+		t.Fatal("Blocked = false right after reaching max")
+	}
+	time.Sleep(80 * time.Millisecond)
+	if rl.Blocked("k") {
+		t.Error("Blocked = true after the window passed")
+	}
+}

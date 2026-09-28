@@ -14,7 +14,7 @@ type contextKey string
 const UserIDKey contextKey = "userID"
 
 // DeviceFingerprintHeader carries a client-computed device fingerprint
-// (e.g. from FingerprintJS). Only requests that actually send it participate
+// (a SHA-256 hash of browser signals). Only requests that actually send it participate
 // in the mismatch check below - most existing API calls don't send it, and
 // are simply not checked, rather than being penalized for its absence.
 const DeviceFingerprintHeader = "X-Device-Fingerprint"

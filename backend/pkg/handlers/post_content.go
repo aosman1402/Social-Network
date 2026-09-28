@@ -31,3 +31,10 @@ func contentError(content string, hasImage bool) string {
     }
     return ""
 }
+
+// isValidPrivacyLevel reports whether level is one of the three post
+// privacy options. Anything else would be stored as-is and then match none
+// of the visibility rules, leaving the post visible to its author only.
+func isValidPrivacyLevel(level string) bool {
+    return level == "public" || level == "almost_private" || level == "private"
+}

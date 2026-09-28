@@ -69,7 +69,9 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
       if (ok) {
         const request = requests.find((r) => r.follower.id === followerId);
         setRequests(requests.filter((r) => r.follower.id !== followerId));
-        toast.success(`Follow request ${action}ed`);
+        toast.success(
+          `Follow request ${action === "accept" ? "accepted" : "declined"}`,
+        );
         // Let the parent update follower count/list in place instead of a
         // full page reload.
         if (onRequestHandled) onRequestHandled(action, request?.follower);

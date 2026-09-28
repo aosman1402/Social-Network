@@ -67,6 +67,84 @@ func (rl *RateLimiter) Limit(next http.HandlerFunc) http.HandlerFunc {
     }
 }
 
+// statusRecorder remembers the status code the wrapped handler wrote, so
+// LimitFailures can tell a failed request from a successful one.
+type statusRecorder struct {
+    http.ResponseWriter
+    status int
+}
+
+func (sr *statusRecorder) WriteHeader(code int) {
+    sr.status = code
+    sr.ResponseWriter.WriteHeader(code)
+}
+
+// LimitFailures is like Limit, but only requests the wrapped handler
+// answers with failStatus (e.g. 401 for a wrong password) count towards
+// the per-IP limit. Successful requests pass freely, so a user who logs in
+// correctly never locks themselves out, while repeated failures from one
+// IP (e.g. password spraying across many accounts) are still stopped.
+func (rl *RateLimiter) LimitFailures(failStatus int, next http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        ip := ClientIP(r)
+        if rl.Blocked(ip) {
+            w.Header().Set("Content-Type", "application/json")
+            w.WriteHeader(http.StatusTooManyRequests)
+            json.NewEncoder(w).Encode(map[string]string{
+                "error": "Too many attempts, please try again later",
+            })
+            return
+        }
+
+        rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+        next(rec, r)
+        if rec.status == failStatus {
+            rl.Record(ip)
+        }
+    }
+}
+
+// recentLocked returns key's attempts still inside the window, dropping
+// older ones. rl.mu must be held.
+func (rl *RateLimiter) recentLocked(key string) []time.Time {
+    cutoff := time.Now().Add(-rl.window)
+    var recent []time.Time
+    for _, t := range rl.attempts[key] {
+        if t.After(cutoff) {
+            recent = append(recent, t)
+        }
+    }
+    if len(recent) == 0 {
+        delete(rl.attempts, key)
+    } else {
+        rl.attempts[key] = recent
+    }
+    return recent
+}
+
+// Blocked reports whether key has already reached max attempts within the
+// window, without recording a new one.
+func (rl *RateLimiter) Blocked(key string) bool {
+    rl.mu.Lock()
+    defer rl.mu.Unlock()
+    return len(rl.recentLocked(key)) >= rl.max
+}
+
+// Record records one attempt for key.
+func (rl *RateLimiter) Record(key string) {
+    rl.mu.Lock()
+    defer rl.mu.Unlock()
+    rl.attempts[key] = append(rl.recentLocked(key), time.Now())
+}
+
+// Reset forgets every attempt recorded for key (e.g. after a successful
+// login, so earlier typos don't count towards a later lockout).
+func (rl *RateLimiter) Reset(key string) {
+    rl.mu.Lock()
+    defer rl.mu.Unlock()
+    delete(rl.attempts, key)
+}
+
 // RecordAndCheck records one attempt for an arbitrary key (as opposed to
 // Limit, which always keys on the request's IP) and reports whether the
 // number of attempts within the window has now reached max. Used to track

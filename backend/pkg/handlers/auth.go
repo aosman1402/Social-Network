@@ -27,6 +27,15 @@ const sessionDuration = 30 * 24 * time.Hour
 // session that account currently has is invalidated as a precaution.
 var failedLoginTracker = middleware.NewRateLimiter(8, 5*time.Minute)
 
+// accountLockout blocks further login attempts for an email after 5 failed
+// ones within 15 minutes, whichever IPs they came from - the per-IP limit in
+// server.go alone can be dodged by an attacker rotating IPs. The block is
+// temporary (it lifts as the failures age out of the window) so it can't be
+// used to lock the real owner out for good, and a successful login clears
+// the count. Failures are recorded for unknown emails too, so being blocked
+// doesn't reveal whether an email is registered.
+var accountLockout = middleware.NewRateLimiter(5, 15*time.Minute)
+
 type AuthHandler struct {
     DB *sql.DB
     // Hub, when set, lets logout / password change close the live
@@ -83,6 +92,7 @@ func (ah *AuthHandler) Register(w http.ResponseWriter, r *http.Request) {
         })
         return
     }
+    req.Email = normalizeEmail(req.Email)
 
     // Validate required fields
     if req.Email == "" || req.Password == "" || req.FirstName == "" ||
@@ -241,11 +251,22 @@ func (ah *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
         })
         return
     }
+    req.Email = normalizeEmail(req.Email)
 
+    if accountLockout.Blocked(req.Email) {
+        w.WriteHeader(http.StatusTooManyRequests)
+        json.NewEncoder(w).Encode(map[string]string{
+            "error": "Too many failed attempts for this account, please try again later",
+        })
+        return
+    }
+
+    // COLLATE NOCASE also matches any account stored before emails were
+    // normalized to lowercase.
     var userID int64
     var passwordHash string
     err := ah.DB.QueryRow(
-        "SELECT id, password_hash FROM users WHERE email = ?",
+        "SELECT id, password_hash FROM users WHERE email = ? COLLATE NOCASE",
         req.Email,
     ).Scan(&userID, &passwordHash)
     userFound := err == nil
@@ -269,6 +290,7 @@ func (ah *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
         if userFound && failedLoginTracker.RecordAndCheck(req.Email) {
             ah.DB.Exec("DELETE FROM sessions WHERE user_id = ?", userID)
         }
+        accountLockout.Record(req.Email)
 
         w.WriteHeader(http.StatusUnauthorized)
         json.NewEncoder(w).Encode(map[string]string{
@@ -284,6 +306,7 @@ func (ah *AuthHandler) Login(w http.ResponseWriter, r *http.Request) {
         })
         return
     }
+    accountLockout.Reset(req.Email)
 
     json.NewEncoder(w).Encode(map[string]interface{}{
         "message": "Login successful",

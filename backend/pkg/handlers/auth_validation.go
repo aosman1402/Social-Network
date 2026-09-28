@@ -86,9 +86,18 @@ func (ah *AuthHandler) nicknameTaken(nickname string) (bool, error) {
 }
 
 // emailTaken reports whether email is already registered to a user.
+// normalizeEmail trims surrounding spaces and lowercases an email, so
+// "Alice@T.test " and "alice@t.test" are the same account everywhere
+// (registration, login, and the per-account login lockout).
+func normalizeEmail(email string) string {
+    return strings.ToLower(strings.TrimSpace(email))
+}
+
+// emailTaken ignores case, so a differently-capitalised copy of an existing
+// email (including one stored before emails were normalized) counts as taken.
 func (ah *AuthHandler) emailTaken(email string) (bool, error) {
     var count int
-    err := ah.DB.QueryRow("SELECT COUNT(*) FROM users WHERE email = ?", email).Scan(&count)
+    err := ah.DB.QueryRow("SELECT COUNT(*) FROM users WHERE email = ? COLLATE NOCASE", email).Scan(&count)
     return count > 0, err
 }
 
