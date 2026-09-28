@@ -100,5 +100,6 @@ Thumbs.db
 *.p12
 *.pfx
 
-# Audit answers - tracked even though the global gitignore excludes *.md
+# Docs tracked even though the global gitignore excludes *.md
 !AUDIT.md
+!README.md

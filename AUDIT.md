@@ -1159,4 +1159,3 @@ Yes - `./build.sh` in the repo root checks Docker is running, builds both images
 
 ## +Do you think in general this project is well done?
 Yes - every required feature works (58/58 checks against the Docker build, all tests passing), and the issues found earlier (login rate limit, debug output and password logging on the register page, email case, no per-account lockout) are fixed and tested. Do one run-through in real browsers before the audit.
-
