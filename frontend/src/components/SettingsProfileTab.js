@@ -272,6 +272,7 @@ export default function SettingsProfileTab({
           </label>
           <input
             id='settings-first-name'
+            autoComplete='given-name'
             type='text'
             name='firstName'
             value={profile.firstName}
@@ -287,6 +288,7 @@ export default function SettingsProfileTab({
           </label>
           <input
             id='settings-last-name'
+            autoComplete='family-name'
             type='text'
             name='lastName'
             value={profile.lastName}
@@ -304,6 +306,7 @@ export default function SettingsProfileTab({
         </label>
         <input
           id='settings-email'
+          autoComplete='email'
           type='email'
           name='email'
           value={profile.email}

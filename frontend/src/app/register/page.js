@@ -203,6 +203,7 @@ export default function RegisterPage() {
             </label>
             <input
               id='register-email'
+              autoComplete='email'
               type='email'
               name='email'
               value={formData.email}
@@ -226,6 +227,7 @@ export default function RegisterPage() {
               </label>
               <input
                 id='register-first-name'
+                autoComplete='given-name'
                 type='text'
                 name='first_name'
                 value={formData.first_name}
@@ -247,6 +249,7 @@ export default function RegisterPage() {
               </label>
               <input
                 id='register-last-name'
+                autoComplete='family-name'
                 type='text'
                 name='last_name'
                 value={formData.last_name}
@@ -270,6 +273,7 @@ export default function RegisterPage() {
             </label>
             <input
               id='register-dob'
+              autoComplete='off'
               type='date'
               name='date_of_birth'
               value={formData.date_of_birth}

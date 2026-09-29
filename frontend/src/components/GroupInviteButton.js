@@ -155,7 +155,7 @@ export default function GroupInviteButton({ groupId, members = [], onInvited }) 
                   <div className='groups-user-info'>
                     <div className='groups-user-name'>{fullName(u)}</div>
                     {u.nickname && (
-                      <div className='groups-user-nick'>@{u.nickname}</div>
+                      <div className='groups-user-nick nickname'>@{u.nickname}</div>
                     )}
                   </div>
                 </div>

@@ -15,6 +15,7 @@ COPY . .
 ARG BACKEND_INTERNAL_URL=http://localhost:8081
 ENV BACKEND_INTERNAL_URL=$BACKEND_INTERNAL_URL
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_OUTPUT=standalone
 RUN npm run build
 
 # --- Runtime stage -----------------------------------------------------------
@@ -30,6 +31,9 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 # server.js entrypoint (see next.config.js `output: "standalone"`).
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+# Static files served as-is (e.g. the login page video) - the standalone
+# build doesn't include public/, so it has to be copied in separately.
+COPY --from=builder /app/public ./public
 
 USER appuser
 

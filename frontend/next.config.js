@@ -9,10 +9,11 @@ const BACKEND_INTERNAL_URL =
   process.env.BACKEND_INTERNAL_URL || "http://localhost:8081";
 
 module.exports = {
-  // Produces a self-contained .next/standalone build (server + only the
-  // node_modules it actually needs), which keeps the Docker runtime image
-  // small and dependency-free.
-  output: "standalone",
+  // The Docker build (see Dockerfile) sets NEXT_OUTPUT=standalone to get a
+  // self-contained .next/standalone build (server + only the node_modules
+  // it actually needs), which keeps the runtime image small and
+  // dependency-free. Locally it's left off so `npm start` works.
+  output: process.env.NEXT_OUTPUT === "standalone" ? "standalone" : undefined,
   // Next.js 16 otherwise auto-generates AGENTS.md/CLAUDE.md files on every
   // dev/build run. They're gitignored (never reach the repo either way),
   // but there's no reason to have them regenerate on disk.

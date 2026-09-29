@@ -259,7 +259,7 @@ export default function PostForm({ onPostCreated, groupId = null }) {
                       <span>
                         {follower.first_name} {follower.last_name}
                         {follower.nickname && (
-                          <span className='text-gray-400'>
+                          <span className='nickname'>
                             {" "}
                             @{follower.nickname}
                           </span>

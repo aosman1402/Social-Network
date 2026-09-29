@@ -2146,6 +2146,49 @@ input, textarea, select {
 }
 
 /* ============================================================
+   Login landing page: looping intro video beside the login form.
+   Below 768px (keep in sync with LoginVideo.js) only the form shows.
+   ============================================================ */
+
+.login-landing {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 48px;
+  padding: 32px 16px;
+}
+
+.login-video {
+  flex: 1 1 0;
+  max-width: 760px;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  box-shadow: var(--shadow-lg);
+  background: #f4e6d4; /* the video's own cream, shown while it loads */
+}
+
+.login-video video,
+.login-video img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* The form keeps its full width next to the video. */
+.login-landing > .max-w-md {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 767px) {
+  .login-video {
+    display: none;
+  }
+}
+
+/* ============================================================
    Login with GitHub (login / register pages + finish sign-up)
    ============================================================ */
 
@@ -4086,6 +4129,23 @@ input[type="radio"] {
   background-clip: text;
   color: transparent;
   white-space: nowrap;
+}
+
+/* @nickname everywhere it's shown: bold, with a slowly shifting brand
+   gradient. The darker 600 shades keep it readable on white; the global
+   "reduce motion" rule below stops the animation for those who ask. */
+.nickname {
+  font-weight: 700;
+  background: linear-gradient(90deg, var(--primary-600), var(--accent-600), #db2777, var(--primary-600));
+  background-size: 300% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: nickname-shift 6s linear infinite;
+}
+
+@keyframes nickname-shift {
+  to { background-position: 300% 0; }
 }
 
 /* Right side: raised round bell + raised profile pill */

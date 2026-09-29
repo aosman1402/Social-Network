@@ -407,12 +407,27 @@ func (ah *AuthHandler) CheckAuth(w http.ResponseWriter, r *http.Request) {
     // from a different device than the one that logged in - invalidate
     // immediately. Only enforced when the caller actually sends the header;
     // requests that don't participate in fingerprinting aren't penalized.
-    if fp := r.Header.Get(middleware.DeviceFingerprintHeader); fp != "" &&
-        storedFingerprint.Valid && storedFingerprint.String != "" &&
+    fp := r.Header.Get(middleware.DeviceFingerprintHeader)
+    if fp != "" && storedFingerprint.Valid && storedFingerprint.String != "" &&
         fp != storedFingerprint.String {
+        log.Printf("[security] session for user %d: device fingerprint mismatch, invalidated", userID)
         ah.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
         json.NewEncoder(w).Encode(map[string]interface{}{"authenticated": false})
         return
+    }
+
+    // A session created without a fingerprint - GitHub login, whose
+    // callback is a plain browser redirect that can't carry the header -
+    // is bound to the first one it's checked with, right after the redirect
+    // lands back on the frontend. From then on the mismatch check above
+    // applies to it like to any password-login session. The WHERE clause
+    // makes this first-come only: an already-bound session is never
+    // overwritten.
+    if fp != "" && (!storedFingerprint.Valid || storedFingerprint.String == "") {
+        ah.DB.Exec(
+            "UPDATE sessions SET fingerprint = ? WHERE session_token = ? AND (fingerprint IS NULL OR fingerprint = '')",
+            fp, cookie.Value,
+        )
     }
 
     // IP changes are common and often legitimate (mobile networks, Wi-Fi

@@ -170,6 +170,42 @@ func TestCheckAuthFingerprintHeaderOmittedStillAuthenticates(t *testing.T) {
 	}
 }
 
+// TestCheckAuthBindsFingerprintToUnboundSession covers sessions created
+// without a fingerprint (GitHub login): the first check-auth that sends one
+// binds it, and from then on a different fingerprint invalidates the
+// session exactly as for a password-login session.
+func TestCheckAuthBindsFingerprintToUnboundSession(t *testing.T) {
+	db := newTestDB(t)
+	auth := &AuthHandler{DB: db}
+	userID := registerTestUser(t, db, "fp-bind@example.com")
+
+	token := "fp-bind-token"
+	insertTestSession(t, db, userID, token, time.Now().Add(time.Hour), "1.2.3.4", "")
+	cookie := &http.Cookie{Name: "session_token", Value: token}
+
+	w := httptest.NewRecorder()
+	auth.CheckAuth(w, checkAuthRequest(cookie, "device-A"))
+	if resp := decodeCheckAuth(t, w); resp["authenticated"] != true {
+		t.Fatalf("first check: authenticated = %v, want true", resp["authenticated"])
+	}
+	var stored string
+	if err := db.QueryRow("SELECT fingerprint FROM sessions WHERE session_token = ?", token).Scan(&stored); err != nil {
+		t.Fatalf("reading stored fingerprint: %v", err)
+	}
+	if stored != "device-A" {
+		t.Fatalf("stored fingerprint = %q, want %q", stored, "device-A")
+	}
+
+	w = httptest.NewRecorder()
+	auth.CheckAuth(w, checkAuthRequest(cookie, "device-B"))
+	if resp := decodeCheckAuth(t, w); resp["authenticated"] != false {
+		t.Errorf("second check from another device: authenticated = %v, want false", resp["authenticated"])
+	}
+	if sessionExists(t, db, token) {
+		t.Error("session row should have been deleted on fingerprint mismatch after binding, but still exists")
+	}
+}
+
 // TestCheckAuthValidSession covers the ordinary happy path: a live session
 // with a matching fingerprint must authenticate and echo back the user's
 // profile fields.

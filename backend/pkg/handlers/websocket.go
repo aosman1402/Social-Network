@@ -14,11 +14,11 @@ import (
 
 var upgrader = gorilla.Upgrader{
     CheckOrigin: func(r *http.Request) bool {
-        origin := r.Header.Get("Origin")
-        // No Origin header at all means a non-browser client (e.g. a
-        // native app or a test script), which CORS/Origin checks don't
-        // apply to in the first place.
-        return origin == "" || middleware.AllowedOrigins[origin]
+        // Only our own frontend's origins. Browsers always send Origin on
+        // a WebSocket handshake, and this app has no non-browser clients,
+        // so a missing Origin is rejected too (tools like wscat need
+        // `-o http://localhost:3000`).
+        return middleware.AllowedOrigins[r.Header.Get("Origin")]
     },
     ReadBufferSize:  1024,
     WriteBufferSize: 1024,

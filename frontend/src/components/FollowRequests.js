@@ -121,7 +121,7 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
                 {request.follower.first_name} {request.follower.last_name}
               </p>
               {request.follower.nickname && (
-                <p className='text-sm text-gray-500'>
+                <p className='text-sm nickname'>
                   @{request.follower.nickname}
                 </p>
               )}

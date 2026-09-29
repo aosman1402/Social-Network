@@ -1,19 +1,13 @@
 import { NextResponse } from "next/server";
 
 /**
- * Middleware for handling authentication and route protection
+ * Proxy (formerly "middleware") for handling authentication and route protection
  * Runs on every request before the page renders
  */
-export function middleware(request) {
+export function proxy(request) {
   // Get the session token from cookies
   const token = request.cookies.get("session_token");
   const { pathname } = request.nextUrl;
-
-  // Define public routes (no authentication required)
-  const publicRoutes = ["/login", "/register"];
-  const isPublicRoute = publicRoutes.some(
-    (route) => pathname === route || pathname.startsWith(route + "/"),
-  );
 
   // Define protected routes (authentication required)
   const protectedRoutes = [
@@ -25,15 +19,17 @@ export function middleware(request) {
     "/create",
     "/search",
   ];
-  const isProtectedRoute = protectedRoutes.some(
-    (route) => pathname === route || pathname.startsWith(route + "/"),
-  );
+  // The home feed ("/") is protected too, but matched exactly - a prefix
+  // match on "/" would cover every route.
+  const isProtectedRoute =
+    pathname === "/" ||
+    protectedRoutes.some(
+      (route) => pathname === route || pathname.startsWith(route + "/"),
+    );
 
-  // Handle authentication redirects
-  // If user is authenticated and tries to access login/register, redirect to home
-  if (isPublicRoute && token) {
-    return NextResponse.redirect(new URL("/", request.url));
-  }
+  // No "already logged in -> leave /login" redirect here: this only sees
+  // that a cookie exists, not whether its session is still valid, so an
+  // expired cookie would bounce between /login and / forever.
 
   // If user is not authenticated and tries to access protected route, redirect to login
   if (isProtectedRoute && !token) {

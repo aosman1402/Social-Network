@@ -409,7 +409,7 @@ export default function ProfileDetailPage() {
           {profile.first_name} {profile.last_name}
         </h2>
         {profile.nickname && (
-          <p className='text-gray-500'>@{profile.nickname}</p>
+          <p className='nickname'>@{profile.nickname}</p>
         )}
         <p className='text-gray-600 mt-3'>
           🔒 This profile is private. Follow to see their posts and info.
@@ -479,7 +479,7 @@ export default function ProfileDetailPage() {
               </div>
 
               {profile.nickname && (
-                <p className='text-gray-500'>@{profile.nickname}</p>
+                <p className='nickname'>@{profile.nickname}</p>
               )}
 
               {profile.about_me && (
@@ -675,7 +675,7 @@ export default function ProfileDetailPage() {
                           {item.user.first_name} {item.user.last_name}
                         </p>
                         {item.user.nickname && (
-                          <p className='text-sm text-gray-500'>
+                          <p className='text-sm nickname'>
                             @{item.user.nickname}
                           </p>
                         )}
@@ -707,7 +707,7 @@ export default function ProfileDetailPage() {
                           {item.user.first_name} {item.user.last_name}
                         </p>
                         {item.user.nickname && (
-                          <p className='text-sm text-gray-500'>
+                          <p className='text-sm nickname'>
                             @{item.user.nickname}
                           </p>
                         )}

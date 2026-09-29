@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/context/AuthContext";
 import GitHubLoginButton from "@/components/GitHubLoginButton";
+import LoginVideo from "@/components/LoginVideo";
 
 // Messages for the ?oauth_error= codes the backend's GitHub login sends
 // back here (backend/pkg/handlers/oauth_github.go).
@@ -47,7 +48,6 @@ export default function LoginPage() {
       const result = await login(email, password);
 
       if (result.success) {
-        console.log("Login successful!");
         // ✅ Force a full page refresh to ensure navbar updates
         window.location.href = "/";
       } else {
@@ -62,7 +62,8 @@ export default function LoginPage() {
   };
 
   return (
-    <div className='min-h-[80vh] flex items-center justify-center'>
+    <div className='login-landing'>
+      <LoginVideo />
       <div className='max-w-md w-full bg-white rounded-lg shadow-lg p-8'>
         <h2 className='text-3xl font-bold text-center mb-6'>Login</h2>
 

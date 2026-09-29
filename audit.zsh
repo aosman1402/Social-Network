@@ -66,4 +66,37 @@ _audit_print() {
 # sql "QUERY" - runs a query on the database, with column headers.
 sql() { sqlite3 -header -column $AUDIT_DB "$1"; }
 
+# audit_cleanup - removes every user the audit created (all *@audit.test
+# users, plus the fixed alice@t.test from AUDIT.md's early blocks) and,
+# through ON DELETE CASCADE, everything they made: posts, comments, follows,
+# groups (and the posts/events inside them), messages, notifications and
+# sessions. Also deletes their uploaded images from backend/uploads and the
+# helpers' cookie jars. Demo and seed users are never touched.
+audit_cleanup() {
+  local match="email LIKE '%@audit.test' OR email = 'alice@t.test'" files f n=0
+  local users=$(sqlite3 $AUDIT_DB "SELECT count(*) FROM users WHERE $match")
+  if (( users == 0 )); then
+    echo "audit_cleanup: no audit users in the database - nothing to do"
+    return 0
+  fi
+  # Collect image paths before the rows that point to them are gone.
+  files=(${(f)"$(sqlite3 $AUDIT_DB "
+    WITH u AS (SELECT id FROM users WHERE $match),
+         g AS (SELECT id FROM groups WHERE creator_id IN u),
+         p AS (SELECT id FROM posts WHERE user_id IN u OR group_id IN g)
+    SELECT avatar_path FROM users WHERE id IN u
+    UNION SELECT image_path FROM posts WHERE id IN p
+    UNION SELECT image_path FROM comments WHERE user_id IN u OR post_id IN p")"})
+  # foreign_keys=ON is needed: the sqlite3 CLI ignores ON DELETE CASCADE
+  # without it, and would leave orphaned posts/messages behind.
+  sqlite3 $AUDIT_DB "PRAGMA foreign_keys=ON; DELETE FROM users WHERE $match; VACUUM;" || return 1
+  for f in $files; do
+    # Only our own uploads ("/uploads/<uuid>.<ext>"); ${f:t} keeps just the
+    # file name, so a stored path can never point outside backend/uploads.
+    [[ $f == /uploads/* && -f backend/uploads/${f:t} ]] && rm -f backend/uploads/${f:t} && (( n++ ))
+  done
+  rm -f $AUDIT_JARS/*.jar alice.jar
+  echo "audit_cleanup: removed $users audit users (and everything they created) and $n uploaded images"
+}
+
 curl -s -m 2 $AUDIT_API/health >/dev/null && echo "audit.zsh loaded - backend is up" || echo "audit.zsh loaded - BACKEND IS NOT RUNNING (cd backend && go run server.go)"

@@ -315,7 +315,7 @@ export default function GroupsPage() {
                           {f.user.first_name} {f.user.last_name}
                         </div>
                         {f.user.nickname && (
-                          <div className='groups-user-nick'>
+                          <div className='groups-user-nick nickname'>
                             @{f.user.nickname}
                           </div>
                         )}

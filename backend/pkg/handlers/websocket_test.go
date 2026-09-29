@@ -167,3 +167,42 @@ func TestHandleWebSocket_SuccessfulUpgrade(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+// TestHandleWebSocket_RejectsMissingOrDisallowedOrigin covers the upgrader's
+// Origin check: even with a valid session cookie, a handshake with no
+// Origin header, or one from a site that isn't our frontend, must be
+// refused rather than upgraded.
+func TestHandleWebSocket_RejectsMissingOrDisallowedOrigin(t *testing.T) {
+	for name, origin := range map[string]string{
+		"no origin header":  "",
+		"disallowed origin": "http://evil.example.com",
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newTestDB(t)
+			hub := websocket.NewHub()
+			go hub.Run()
+			wsh := &WebSocketHandler{DB: db, Hub: hub}
+
+			userID := registerTestUser(t, db, "ws-origin@example.com")
+			token := "ws-origin-token"
+			insertTestSession(t, db, userID, token, time.Now().Add(time.Hour), "1.2.3.4", "")
+
+			server := httptest.NewServer(http.HandlerFunc(wsh.HandleWebSocket))
+			defer server.Close()
+
+			header := http.Header{}
+			header.Set("Cookie", "session_token="+token)
+			if origin != "" {
+				header.Set("Origin", origin)
+			}
+			conn, resp, err := gorilla.DefaultDialer.Dial("ws"+strings.TrimPrefix(server.URL, "http"), header)
+			if err == nil {
+				conn.Close()
+				t.Fatal("Dial succeeded, want the handshake to be refused")
+			}
+			if resp == nil || resp.StatusCode != http.StatusForbidden {
+				t.Errorf("handshake response = %v, want 403 Forbidden", resp)
+			}
+		})
+	}
+}

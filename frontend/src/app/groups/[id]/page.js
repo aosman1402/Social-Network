@@ -398,7 +398,7 @@ export default function GroupDetailPage() {
                       <p className='group-member-name'>
                         {req.user.first_name} {req.user.last_name}
                       </p>
-                      <p className='group-member-nick'>
+                      <p className='group-member-nick nickname'>
                         @{req.user.nickname || req.user.first_name}
                       </p>
                     </div>
@@ -443,7 +443,7 @@ export default function GroupDetailPage() {
                           {member.user.first_name} {member.user.last_name}
                         </p>
                         {member.user.nickname && (
-                          <p className='group-member-nick'>
+                          <p className='group-member-nick nickname'>
                             @{member.user.nickname}
                           </p>
                         )}

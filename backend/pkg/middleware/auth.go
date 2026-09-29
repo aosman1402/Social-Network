@@ -69,6 +69,7 @@ func (am *AuthMiddleware) Authenticate(next http.HandlerFunc) http.HandlerFunc {
         if fp := r.Header.Get(DeviceFingerprintHeader); fp != "" &&
             storedFingerprint.Valid && storedFingerprint.String != "" &&
             fp != storedFingerprint.String {
+            log.Printf("[security] session for user %d: device fingerprint mismatch, invalidated", userID)
             am.DB.Exec("DELETE FROM sessions WHERE session_token = ?", cookie.Value)
             writeUnauthorized(w, "Session invalidated")
             return

@@ -1,7 +1,8 @@
 
 # Functional
 
-## Has the requirement for the allowed packages been respected?
+## Has the requirement for the allowed packages been respected? 
+[note: bash didn't like it needs to be amended]
 Yes - check by running bash command:
 ```zsh
 allowed='^(github\.com/(gorilla/websocket|golang-migrate/migrate|rubenv/sql-migrate|mattn/go-sqlite3|google/uuid|gofrs/uuid)|golang\.org/x/crypto/bcrypt)'
@@ -249,7 +250,8 @@ echo "   GET  /api/posts (logged in)     -> $(curl -s -o /dev/null -w '%{http_co
 
 echo "\n3) OTHER PROTOCOL - WebSocket on /ws (chat, typing, read receipts, ping)"
 echo "   handshake without session       -> $(curl -s -o /dev/null -w '%{http_code}' -m 2 -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://localhost:8081/ws)  (401 = rejected)"
-echo "   handshake with session          -> $(curl -s -o /dev/null -w '%{http_code}' -m 2 -b alice.jar -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://localhost:8081/ws)  (101 = switched to WebSocket)"
+echo "   handshake with session          -> $(curl -s -o /dev/null -w '%{http_code}' -m 2 -b alice.jar -H 'Origin: http://localhost:3000' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://localhost:8081/ws)  (101 = switched to WebSocket)"
+echo "   same session, from another site -> $(curl -s -o /dev/null -w '%{http_code}' -m 2 -b alice.jar -H 'Origin: http://evil.example.com' -H 'Connection: Upgrade' -H 'Upgrade: websocket' -H 'Sec-WebSocket-Version: 13' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' http://localhost:8081/ws)  (403 = only our frontend may connect)"
 echo "   message types handled: $(grep -oE 'case "[a-z_]+"' backend/pkg/websocket/client.go | cut -d'"' -f2 | tr '\n' ' ')"
 
 echo "\n4) TESTS for the App"
@@ -452,7 +454,7 @@ echo "Demo users from migration 22: $(sqlite3 $DB "SELECT COUNT(*) FROM users WH
 
 Every answer is followed by the fastest accurate check. Most are terminal blocks - run them from the repo root in zsh, with the backend running (`cd backend && go run server.go`):
 
-- **`source audit.zsh`** (first line of every block) loads four helpers: `mk alice` registers and logs in a **brand-new** user and sets `$ALICE` to its id (`mk carol private` makes it private); `as alice GET /path` / `as alice POST /path '{json}'` calls the API as that user and prints `STATUS body` (`as anon ...` = not logged in); `asf` does the same for uploads; `sql "..."` queries the database. Fresh users every time, so the results never depend on earlier tests.
+- **`source audit.zsh`** (first line of every block) loads five helpers: `mk alice` registers and logs in a **brand-new** user and sets `$ALICE` to its id (`mk carol private` makes it private); `as alice GET /path` / `as alice POST /path '{json}'` calls the API as that user and prints `STATUS body` (`as anon ...` = not logged in); `asf` does the same for uploads; `sql "..."` queries the database. Fresh users every time, so the results never depend on earlier tests. When you're done, `audit_cleanup` deletes every user the audit created (`*@audit.test` and `alice@t.test`), everything they made (via `ON DELETE CASCADE`) and their uploaded images - demo and seed users are left alone.
 - Registration is limited to 20 per minute per computer - if `mk` prints "Too many attempts", wait a minute.
 - Real-time (WebSocket) behaviour is proved by the project's Go tests (`go test ... -run <name> -v`), which open real WebSocket connections; the browser check is given alongside.
 

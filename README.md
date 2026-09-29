@@ -64,7 +64,7 @@ backend
 The project runs as two separate Docker images, each with its own `Dockerfile`:
 
 - **Backend container** (`backend/Dockerfile`) — a multi-stage Go build; runs the server-side logic and exposes port `8081` for the frontend and external clients to reach it. The SQLite database (`/app/pkg/db/sqlite`) and uploaded files (`/app/uploads`) are mounted as volumes so they survive container recreation.
-- **Frontend container** (`frontend/Dockerfile`) — a multi-stage Next.js build (`output: "standalone"`); serves the client-side HTML/CSS/JS and exposes port `3000` to users' browsers, communicating with the backend over HTTP.
+- **Frontend container** (`frontend/Dockerfile`) — a multi-stage Next.js build (`output: "standalone"`, switched on by `NEXT_OUTPUT=standalone` in the Dockerfile, so a local `npm start` isn't affected); serves the client-side HTML/CSS/JS and exposes port `3000` to users' browsers, communicating with the backend over HTTP.
 
 `docker-compose.yml` at the repo root builds and wires both together. See [Run it with Docker](#run-it-with-docker) below.
 
@@ -96,9 +96,11 @@ No other characters are permitted. The same rule applies to setting a new passwo
 Nicknames must also be unique. As the user types, a live check (debounced, hitting the server) marks the field with a ✓ once the nickname is valid and available, or a ✕ if it's badly formatted or already taken - submission is blocked until it resolves to available. Enforced by the backend as well, so a nickname can't be registered out from under an in-flight check.
 
 **Session & cookie security**:
-- A session stays valid for up to **30 days**. The cookie carrying it (`session_token`) is `HttpOnly` (unreachable from JS, so it can't be stolen via XSS), and `SameSite=Lax` (blocks CSRF). It's also marked `Secure` whenever the connection is actually HTTPS - conditional rather than hardcoded, so it still works over plain HTTP in local development, and engages automatically once deployed behind HTTPS.
+- A session stays valid for up to **30 days**. The cookie carrying it (`session_token`) is `HttpOnly` (unreachable from JS, so it can't be stolen via XSS), and `SameSite=Lax` (blocks CSRF). It's also marked `Secure` whenever the connection is actually HTTPS - conditional rather than hardcoded, so it still works over plain HTTP in local development, and engages automatically once deployed behind HTTPS. Locally that's not a gap: `localhost` traffic stays on the loopback interface and never leaves the machine, so there's nothing on the network to read.
 - **IP address changes** are logged for visibility but don't invalidate the session - mobile networks and Wi-Fi switching change IPs often and legitimately.
-- **Device fingerprint mismatch** (via [FingerprintJS](https://github.com/fingerprintjs/fingerprintjs)) invalidates the session immediately - a stronger signal the cookie is being used from a different device than the one that logged in.
+- **Device fingerprint mismatch** invalidates the session immediately (and is logged). The fingerprint is a SHA-256 hash (built-in Web Crypto API, no library) of the browser's user agent, language, platform, CPU core count and time zone (`frontend/src/utils/fingerprint.js`), sent as the `X-Device-Fingerprint` header by `/login` and `/check-auth` (which runs on every page load). Screen size is left out on purpose: it changes on the same device (another monitor, DevTools' device toolbar) and would log the user out. A GitHub login can't send the header (its callback is a plain browser redirect), so its session is bound to the fingerprint of the first `/check-auth` after it lands on the frontend.
+  - **What it protects against:** a stolen cookie pasted into another browser - that browser's first page load sends a different fingerprint and the session is ended for everyone holding it.
+  - **What it doesn't:** the fingerprint is computed by the client, so it's a tripwire, not a lock. Someone replaying a stolen cookie with a script can simply leave the header out (the check only runs when it's sent, so ordinary API calls, which don't send it, aren't affected). The real protection against cookie theft is the cookie itself being `HttpOnly` and `SameSite=Lax` (above), plus `Secure` once served over HTTPS.
 - **Brute-force protection**: repeated failed login attempts against one account (even spread across different IPs) invalidate any session that account currently has, forcing re-login everywhere.
 - **Changing your password** invalidates every session on the account, including on other devices - not just the one making the change.
 
@@ -192,7 +194,7 @@ Additional notifications: a follow request accepted or declined, a new follower 
 ## How to Run it
 
 ### Prerequisites
-- Go (backend)
+- Go (backend), plus a C compiler for the SQLite driver (on macOS: `xcode-select --install`; on Linux: `gcc`)
 - Node.js + npm (frontend)
 
 No `.env` files or extra configuration are required — the backend uses an embedded SQLite database and the frontend is pre-configured to talk to it.
@@ -204,6 +206,7 @@ cd backend
 go run server.go
 ```
 
+- The first run after a fresh clone takes a minute or two: Go downloads the modules and compiles the SQLite driver (`go-sqlite3`, which is C code built via cgo). Both are cached, so later runs start in seconds.
 - Runs on `http://localhost:8081` by default (override with the `PORT` env var).
 - On startup it opens `backend/pkg/db/sqlite/social-network.db` and applies any pending migrations from `backend/pkg/db/migrations/sqlite` automatically.
 - Override the DB/migrations locations with the `DB_PATH` / `MIGRATIONS_PATH` env vars if needed.
@@ -215,11 +218,15 @@ In a separate terminal:
 ```bash
 cd frontend
 npm install
-npm run dev
+npm run build
+npm start
 ```
 
 - Runs on `http://localhost:3000`.
-- `next.config.js` already proxies `/api/*` requests to `http://localhost:8081`, so the backend must be running first. The live WebSocket connection goes straight to `ws://localhost:8081/ws`.
+- `npm run build` compiles every page up front, so the app loads instantly and the browser console stays clean. Re-run it after changing frontend code.
+- While developing, use `npm run dev` instead of the last two commands: it hot-reloads on every save, but compiles each page the first time it's opened (so the first load is slow) and logs dev-only messages such as `[HMR] connected` in the browser console.
+- `src/proxy.js` redirects anyone without a session cookie from protected pages (including `/`) straight to `/login`.
+- `next.config.js` already proxies `/api/*` requests to `http://localhost:8081`, so the backend must be running first. The live WebSocket connection goes straight to `ws://localhost:8081/ws`, which only accepts handshakes whose `Origin` is the frontend (`http://localhost:3000`) - a missing or foreign `Origin` gets 403, even with a valid session cookie.
 
 ### 3. Use the app
 
