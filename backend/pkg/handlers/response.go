@@ -1,8 +1,8 @@
 package handlers
 
 import (
-    "encoding/json"
-    "net/http"
+	"encoding/json"
+	"net/http"
 )
 
 // writeJSONError writes a JSON error body ({"error": message}) with the
@@ -13,7 +13,7 @@ import (
 // which then crashes any caller doing `data.error || "fallback"` on a null
 // with a TypeError instead of showing the intended fallback message.
 func writeJSONError(w http.ResponseWriter, status int, message string) {
-    w.Header().Set("Content-Type", "application/json")
-    w.WriteHeader(status)
-    json.NewEncoder(w).Encode(map[string]string{"error": message})
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(map[string]string{"error": message})
 }

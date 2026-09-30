@@ -9,6 +9,7 @@ import { useWebSocket } from "@/context/WebSocketContext";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { getNotificationIcon, getNotificationTarget } from "@/utils/helpers";
+import Icon from "@/components/Icon";
 
 export default function NotificationsPage() {
   const router = useRouter();
@@ -149,7 +150,7 @@ export default function NotificationsPage() {
         <div className='divide-y'>
           {notifications.length === 0 ? (
             <div className='p-8 text-center text-gray-500'>
-              <p className='text-4xl mb-2'>🔔</p>
+              <p className='text-4xl mb-2'><Icon name='bell' /></p>
               <p>No notifications yet</p>
             </div>
           ) : (
@@ -167,7 +168,7 @@ export default function NotificationsPage() {
                 }}>
                 <div className='flex items-start space-x-3'>
                   <div className='text-2xl'>
-                    {getNotificationIcon(notification.type)}
+                    <Icon name={getNotificationIcon(notification.type)} />
                   </div>
                   <div className='flex-1'>
                     <p

@@ -6,6 +6,7 @@ import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { getAvatarColor } from "@/utils/helpers";
+import Icon from "@/components/Icon";
 
 export default function GroupsPage() {
   const { user } = useRequireAuth();
@@ -189,10 +190,10 @@ export default function GroupsPage() {
 
   // What the viewer's relationship to a group is, for the card's badge.
   const groupStatus = (g) => {
-    if (g.creator_id === user?.id) return { label: "★ Creator", tone: "creator" };
-    if (g.is_member) return { label: "✓ Member", tone: "member" };
-    if (g.is_invited) return { label: "✉ Invited", tone: "invited" };
-    if (g.has_pending_request) return { label: "⏳ Requested", tone: "pending" };
+    if (g.creator_id === user?.id) return { icon: "star", label: "Creator", tone: "creator" };
+    if (g.is_member) return { icon: "check", label: "Member", tone: "member" };
+    if (g.is_invited) return { icon: "mail", label: "Invited", tone: "invited" };
+    if (g.has_pending_request) return { icon: "clock", label: "Requested", tone: "pending" };
     return { label: "Join →", tone: "join" };
   };
 
@@ -206,11 +207,11 @@ export default function GroupsPage() {
             Find your people - join a group, or start your own and invite your followers.
           </p>
           <div className='groups-hero-stats'>
-            <span className='groups-hero-chip'>👥 {groups.length} groups</span>
-            <span className='groups-hero-chip'>✓ You&apos;re in {myGroups.length}</span>
+            <span className='groups-hero-chip'><Icon name='users' /> {groups.length} groups</span>
+            <span className='groups-hero-chip'><Icon name='check' /> You&apos;re in {myGroups.length}</span>
             {invitations.length > 0 && (
               <span className='groups-hero-chip groups-hero-chip--alert'>
-                ✉ {invitations.length} invitation{invitations.length === 1 ? "" : "s"}
+                <Icon name='mail' color='currentColor' /> {invitations.length} invitation{invitations.length === 1 ? "" : "s"}
               </span>
             )}
           </div>
@@ -381,6 +382,7 @@ export default function GroupsPage() {
                     <div className='groups-card-heading'>
                       <h3 className='groups-card-title'>{g.title}</h3>
                       <span className={`groups-status groups-status--${status.tone}`}>
+                        {status.icon && <Icon name={status.icon} color='currentColor' />}{" "}
                         {status.label}
                       </span>
                     </div>
@@ -390,7 +392,7 @@ export default function GroupsPage() {
                   </p>
                   <div className='groups-card-meta'>
                     <span className='groups-card-pill'>
-                      👥 {g.member_count ?? 0} member{(g.member_count ?? 0) === 1 ? "" : "s"}
+                      <Icon name='users' /> {g.member_count ?? 0} member{(g.member_count ?? 0) === 1 ? "" : "s"}
                     </span>
                   </div>
                 </Link>

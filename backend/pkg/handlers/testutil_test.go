@@ -1,11 +1,11 @@
 package handlers
 
 import (
-    "database/sql"
-    "path/filepath"
-    "testing"
+	"database/sql"
+	"path/filepath"
+	"testing"
 
-    "social-network/pkg/db/sqlite"
+	"social-network/pkg/db/sqlite"
 )
 
 // newTestDB spins up a fresh, throwaway SQLite database with every
@@ -20,37 +20,37 @@ import (
 // down migration does), so tests start from an empty database and can
 // count what they create. newSeededTestDB keeps it.
 func newTestDB(t *testing.T) *sql.DB {
-    t.Helper()
-    db := newSeededTestDB(t)
-    if _, err := db.Exec(`DELETE FROM users WHERE email LIKE '%@demo.test'`); err != nil {
-        t.Fatalf("failed to remove demo data: %v", err)
-    }
-    return db
+	t.Helper()
+	db := newSeededTestDB(t)
+	if _, err := db.Exec(`DELETE FROM users WHERE email LIKE '%@demo.test'`); err != nil {
+		t.Fatalf("failed to remove demo data: %v", err)
+	}
+	return db
 }
 
 // newSeededTestDB is newTestDB with the demo data still in it.
 func newSeededTestDB(t *testing.T) *sql.DB {
-    t.Helper()
+	t.Helper()
 
-    dbPath := filepath.Join(t.TempDir(), "test.db")
-    migrationsPath, err := filepath.Abs("../db/migrations/sqlite")
-    if err != nil {
-        t.Fatalf("failed to resolve migrations path: %v", err)
-    }
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	migrationsPath, err := filepath.Abs("../db/migrations/sqlite")
+	if err != nil {
+		t.Fatalf("failed to resolve migrations path: %v", err)
+	}
 
-    db, err := sqlite.NewDB(sqlite.Config{
-        DBPath:            dbPath,
-        MigrationsPath:    migrationsPath,
-        EnableForeignKeys: true,
-    })
-    if err != nil {
-        t.Fatalf("failed to open test database: %v", err)
-    }
-    t.Cleanup(func() { db.Close() })
+	db, err := sqlite.NewDB(sqlite.Config{
+		DBPath:            dbPath,
+		MigrationsPath:    migrationsPath,
+		EnableForeignKeys: true,
+	})
+	if err != nil {
+		t.Fatalf("failed to open test database: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
 
-    if err := db.ApplyMigrations(migrationsPath); err != nil {
-        t.Fatalf("failed to apply migrations: %v", err)
-    }
+	if err := db.ApplyMigrations(migrationsPath); err != nil {
+		t.Fatalf("failed to apply migrations: %v", err)
+	}
 
-    return db.DB
+	return db.DB
 }

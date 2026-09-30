@@ -12,6 +12,7 @@ import PostCard from "@/components/PostCard";
 import GroupChat from "@/components/GroupChat";
 import GroupEvents from "@/components/GroupEvents";
 import GroupInviteButton from "@/components/GroupInviteButton";
+import Icon from "@/components/Icon";
 
 // Notifications that change who's in a group (related_id = the group).
 const GROUP_MEMBERSHIP_NOTIFICATIONS = new Set([
@@ -308,7 +309,7 @@ export default function GroupDetailPage() {
                 {group.description || "No description"}
               </p>
               <div className='group-meta'>
-                <span>👥 {group.member_count || 0} members</span>
+                <span><Icon name='users' /> {group.member_count || 0} members</span>
                 <span>
                   Created {new Date(group.created_at).toLocaleDateString()}
                 </span>

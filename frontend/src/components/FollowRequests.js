@@ -6,6 +6,7 @@ import { toast } from "@/context/ToastContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
+import Icon from "@/components/Icon";
 
 export default function FollowRequests({ onRequestHandled, onCountChange }) {
   const router = useRouter();
@@ -131,14 +132,16 @@ export default function FollowRequests({ onRequestHandled, onCountChange }) {
             <button
               onClick={() => handleRequest(request.follower.id, "accept")}
               className='p-2 bg-green-500 text-white rounded-full hover:bg-green-600 transition'
-              title='Accept'>
-              ✓
+              title='Accept'
+              aria-label='Accept'>
+              <Icon name='check' color='currentColor' />
             </button>
             <button
               onClick={() => handleRequest(request.follower.id, "decline")}
               className='p-2 bg-red-500 text-white rounded-full hover:bg-red-600 transition'
-              title='Decline'>
-              ✕
+              title='Decline'
+              aria-label='Decline'>
+              <Icon name='x' color='currentColor' />
             </button>
           </div>
         </div>

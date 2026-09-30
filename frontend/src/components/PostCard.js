@@ -9,6 +9,7 @@ import { apiFetch } from "@/lib/api";
 import { useWebSocket } from "@/context/WebSocketContext";
 import PrivacyBadge from "@/components/PrivacyBadge";
 import DeleteButton from "@/components/DeleteButton";
+import Icon from "@/components/Icon";
 
 export default function PostCard({
   post,
@@ -359,7 +360,7 @@ export default function PostCard({
                   className='hidden'
                   disabled={submittingComment}
                 />
-                📷 Add Image
+                <Icon name='camera' /> Add Image
               </label>
               {commentImagePreview && (
                 <div className='relative inline-block'>

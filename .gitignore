@@ -55,8 +55,8 @@ next-env.d.ts
 frontend/coverage/
 frontend/.nyc_output/
 
-# Environment files - never commit real env vars, only the example template
-.env
+# Environment files - never commit real env vars, only the example template - do not commit real secretso - Only one exemption of .env due to GitHub for the bonus question.
+.env 
 .env.local
 .env.development.local
 .env.test.local

@@ -4,19 +4,19 @@
 export const PRIVACY_OPTIONS = [
   {
     value: "public",
-    icon: "🌍",
+    icon: "globe",
     label: "Public",
     info: "All users in the social network will be able to see the post.",
   },
   {
     value: "almost_private",
-    icon: "👥",
+    icon: "users",
     label: "Almost Private",
     info: "Only followers of the creator of the post will be able to see the post.",
   },
   {
     value: "private",
-    icon: "🔒",
+    icon: "lock",
     label: "Private",
     info: "Only the followers chosen by the creator of the post will be able to see it.",
   },
@@ -25,7 +25,7 @@ export const PRIVACY_OPTIONS = [
 // A group post ignores privacy_level entirely - only group members can see
 // it - so it gets its own badge instead of a misleading "Public" one.
 export const GROUP_PRIVACY = {
-  icon: "👪",
+  icon: "group",
   label: "Group",
   info: "Only members of this group will be able to see the post.",
 };

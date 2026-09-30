@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { getInitials, getAvatarSrc } from "@/utils/helpers";
+import Icon from "@/components/Icon";
 import {
   mergeMessages,
   insertAtCursor,
@@ -247,7 +248,7 @@ export default function GroupChat({ groupId, members = [], onUnavailable }) {
           <p className='group-empty'>Loading messages...</p>
         ) : messages.length === 0 ? (
           <p className='group-empty group-chat-empty'>
-            No messages yet - say hello 👋
+            No messages yet - say hello!
           </p>
         ) : (
           messages.map((msg) => {
@@ -299,7 +300,7 @@ export default function GroupChat({ groupId, members = [], onUnavailable }) {
             onClick={() => setPickerOpen((v) => !v)}
             aria-label='Insert emoji'
             aria-expanded={pickerOpen}>
-            😊
+            <Icon name='smile' />
           </button>
           {pickerOpen && (
             <div className='group-chat-emoji-grid' role='listbox' aria-label='Emoji'>

@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { apiFetch } from "@/lib/api";
 import { getNotificationIcon, getNotificationTarget } from "@/utils/helpers";
+import Icon from "@/components/Icon";
 
 function BellIcon({ size = 20 }) {
   return (
@@ -211,7 +212,7 @@ export default function NotificationBell() {
               <div className='p-4 text-center text-gray-400'>Loading...</div>
             ) : notifications.length === 0 ? (
               <div className='p-8 text-center text-gray-400'>
-                <p className='text-2xl mb-2'>🔔</p>
+                <p className='text-2xl mb-2'><Icon name='bell' /></p>
                 <p>No notifications yet</p>
               </div>
             ) : (
@@ -224,7 +225,7 @@ export default function NotificationBell() {
                   }`}>
                   <div className='flex items-start space-x-3'>
                     <div className='text-2xl'>
-                      {getNotificationIcon(notification.type)}
+                      <Icon name={getNotificationIcon(notification.type)} />
                     </div>
                     <div className='flex-1 min-w-0'>
                       <p

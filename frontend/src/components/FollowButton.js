@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
+import Icon from "@/components/Icon";
 
 export default function FollowButton({
   userId,
@@ -89,7 +90,7 @@ export default function FollowButton({
         title='Cancel follow request'
         className='px-4 py-2 bg-yellow-100 text-yellow-800 rounded-lg hover:bg-red-100 hover:text-red-700 transition'>
         <span className='flex items-center space-x-2'>
-          <span>⏳</span>
+          <Icon name='clock' color='currentColor' />
           <span>{loading ? "Cancelling..." : "Cancel Request"}</span>
         </span>
       </button>
@@ -109,7 +110,7 @@ export default function FollowButton({
         <span>Loading...</span>
       ) : isFollowing ? (
         <>
-          <span>✓</span>
+          <Icon name='check' color='currentColor' />
           <span>Following</span>
         </>
       ) : (

@@ -5,6 +5,7 @@ import { useAuth } from "@/context/AuthContext";
 import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import { PRIVACY_OPTIONS } from "@/lib/privacy";
+import Icon from "@/components/Icon";
 import InfoTooltip from "@/components/InfoTooltip";
 
 export default function PostForm({ onPostCreated, groupId = null }) {
@@ -196,7 +197,7 @@ export default function PostForm({ onPostCreated, groupId = null }) {
                     onChange={() => handlePrivacyChange(option.value)}
                     disabled={loading}
                   />
-                  <span aria-hidden='true'>{option.icon}</span>
+                  <Icon name={option.icon} />
                   {option.label}
                   <InfoTooltip text={option.info} />
                 </label>
@@ -216,7 +217,7 @@ export default function PostForm({ onPostCreated, groupId = null }) {
                   className='hidden'
                   disabled={loading}
                 />
-                📷 <span className='text-sm'>Photo</span>
+                <Icon name='camera' /> <span className='text-sm'>Photo</span>
               </label>
 
             </div>

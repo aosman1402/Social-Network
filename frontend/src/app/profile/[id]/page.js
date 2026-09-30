@@ -11,6 +11,7 @@ import PrivacyBadge from "@/components/PrivacyBadge";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
+import Icon from "@/components/Icon";
 
 const VALID_TABS = ["posts", "followers", "following", "requests"];
 
@@ -412,7 +413,7 @@ export default function ProfileDetailPage() {
           <p className='nickname'>@{profile.nickname}</p>
         )}
         <p className='text-gray-600 mt-3'>
-          🔒 This profile is private. Follow to see their posts and info.
+          <Icon name='lock' /> This profile is private. Follow to see their posts and info.
         </p>
         <div className='mt-4 flex justify-center gap-2'>
           <button
@@ -488,14 +489,14 @@ export default function ProfileDetailPage() {
 
               <div className='flex flex-wrap items-center gap-4 mt-2'>
                 <span className='text-sm text-gray-500'>
-                  📧 {profile.email}
+                  <Icon name='mail' /> {profile.email}
                 </span>
                 <span className='text-sm text-gray-500'>
-                  📅 Joined {formatDate(profile.created_at)}
+                  <Icon name='calendar' /> Joined {formatDate(profile.created_at)}
                 </span>
                 {profile.date_of_birth && (
                   <span className='text-sm text-gray-500'>
-                    🎂 Born {formatDate(profile.date_of_birth, "Unknown")}
+                    <Icon name='cake' /> Born {formatDate(profile.date_of_birth, "Unknown")}
                   </span>
                 )}
               </div>
@@ -524,8 +525,8 @@ export default function ProfileDetailPage() {
                     {togglingPrivacy
                       ? "Saving..."
                       : profile.is_public
-                        ? "🌍 Public"
-                        : "🔒 Private"}
+                        ? <><Icon name='globe' color='currentColor' /> Public</>
+                        : <><Icon name='lock' color='currentColor' /> Private</>}
                   </button>
                 </>
               ) : (
@@ -643,10 +644,10 @@ export default function ProfileDetailPage() {
 
                     <div className='flex items-center gap-4 mt-2 pt-2 border-t'>
                       <span className='text-sm text-gray-500'>
-                        ❤️ {post.like_count || 0} likes
+                        <Icon name='heart' /> {post.like_count || 0} likes
                       </span>
                       <span className='text-sm text-gray-500'>
-                        💬 {post.comment_count || 0} comments
+                        <Icon name='message' /> {post.comment_count || 0} comments
                       </span>
                     </div>
                   </div>

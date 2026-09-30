@@ -1,5 +1,7 @@
-uploads/
-pkg/db/sqlite/*.db
+# The database file and uploads/ ARE included on purpose - the Dockerfile
+# bakes them into the image so a fresh Docker volume starts with the same
+# demo data as the local setup. Only SQLite's temporary side files are
+# left out, since a copy mid-write would be inconsistent.
 pkg/db/sqlite/*.db-*
 *.log
 .git

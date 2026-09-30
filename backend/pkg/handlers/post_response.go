@@ -1,9 +1,9 @@
 package handlers
 
 import (
-    "database/sql"
+	"database/sql"
 
-    "social-network/pkg/models"
+	"social-network/pkg/models"
 )
 
 // postRowColumns is the exact column list every "list of posts" query
@@ -30,37 +30,37 @@ const postRowColumns = `p.id, p.user_id, p.content, p.image_path, p.privacy_leve
 // GetPosts included like_count/is_liked/is_saved, so post cards on a
 // profile or group page silently lost their like/save state).
 func scanPostRow(rows *sql.Rows) (map[string]interface{}, error) {
-    var post models.Post
-    var user models.User
-    var commentCount, likeCount int
-    var isLiked, isSaved bool
+	var post models.Post
+	var user models.User
+	var commentCount, likeCount int
+	var isLiked, isSaved bool
 
-    err := rows.Scan(
-        &post.ID, &post.UserID, &post.Content, &post.ImagePath, &post.PrivacyLevel,
-        &post.GroupID, &post.CreatedAt, &post.UpdatedAt,
-        &user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname,
-        &user.AvatarPath, &user.IsPublic,
-        &commentCount, &likeCount, &isLiked, &isSaved,
-    )
-    if err != nil {
-        return nil, err
-    }
+	err := rows.Scan(
+		&post.ID, &post.UserID, &post.Content, &post.ImagePath, &post.PrivacyLevel,
+		&post.GroupID, &post.CreatedAt, &post.UpdatedAt,
+		&user.ID, &user.Email, &user.FirstName, &user.LastName, &user.Nickname,
+		&user.AvatarPath, &user.IsPublic,
+		&commentCount, &likeCount, &isLiked, &isSaved,
+	)
+	if err != nil {
+		return nil, err
+	}
 
-    return map[string]interface{}{
-        "id":            post.ID,
-        "user_id":       post.UserID,
-        "content":       post.Content,
-        "image_path":    post.ImagePath,
-        "privacy_level": post.PrivacyLevel,
-        "group_id":      post.GroupID,
-        "created_at":    post.CreatedAt,
-        "updated_at":    post.UpdatedAt,
-        "user":          user,
-        "comment_count": commentCount,
-        "like_count":    likeCount,
-        "is_liked":      isLiked,
-        "is_saved":      isSaved,
-    }, nil
+	return map[string]interface{}{
+		"id":            post.ID,
+		"user_id":       post.UserID,
+		"content":       post.Content,
+		"image_path":    post.ImagePath,
+		"privacy_level": post.PrivacyLevel,
+		"group_id":      post.GroupID,
+		"created_at":    post.CreatedAt,
+		"updated_at":    post.UpdatedAt,
+		"user":          user,
+		"comment_count": commentCount,
+		"like_count":    likeCount,
+		"is_liked":      isLiked,
+		"is_saved":      isSaved,
+	}, nil
 }
 
 // postVisibilityClause is the visibility rule shared by every "can this
@@ -95,10 +95,10 @@ const postVisibilityClause = `(
 // comment endpoints can't be used to read or write comments on a post the
 // caller isn't otherwise allowed to see.
 func canViewPost(db *sql.DB, postID, userID int64) (bool, error) {
-    var canView bool
-    err := db.QueryRow(
-        `SELECT EXISTS(SELECT 1 FROM posts p WHERE p.id = ? AND `+postVisibilityClause+`)`,
-        postID, userID, userID, userID, userID,
-    ).Scan(&canView)
-    return canView, err
+	var canView bool
+	err := db.QueryRow(
+		`SELECT EXISTS(SELECT 1 FROM posts p WHERE p.id = ? AND `+postVisibilityClause+`)`,
+		postID, userID, userID, userID, userID,
+	).Scan(&canView)
+	return canView, err
 }

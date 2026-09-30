@@ -7,6 +7,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import { localInputToRFC3339, nowAsLocalInput, splitResponses } from "@/utils/events";
 import DeleteButton from "@/components/DeleteButton";
+import Icon from "@/components/Icon";
 
 const RESPONSE_OPTIONS = [
   { value: "going", label: "Going" },
@@ -253,7 +254,7 @@ export default function GroupEvents({ groupId }) {
                     )}
                   </div>
                 </div>
-                <p className='group-event-when'>📅 {formatEventTime(event.event_time)}</p>
+                <p className='group-event-when'><Icon name='calendar' /> {formatEventTime(event.event_time)}</p>
                 {event.description && (
                   <p className='group-event-desc'>{event.description}</p>
                 )}

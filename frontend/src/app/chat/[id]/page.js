@@ -7,6 +7,7 @@ import { toast } from "@/context/ToastContext";
 import { apiFetch } from "@/lib/api";
 import LoadingSpinner from "@/components/LoadingSpinner";
 import Avatar from "@/components/Avatar";
+import Icon from "@/components/Icon";
 import { useAuth } from "@/context/AuthContext";
 import { useWebSocket } from "@/context/WebSocketContext";
 import {
@@ -392,7 +393,7 @@ export default function ChatDetailPage() {
           <Avatar user={otherUser} size='xl' />
           <h2 className='dm-state-title'>{otherName}</h2>
           <p className='dm-state-text'>
-            🔒 You can&apos;t message {otherUser.first_name} yet. You can only send
+            <Icon name='lock' /> You can&apos;t message {otherUser.first_name} yet. You can only send
             direct messages to people who follow you or that you follow.
           </p>
           <div className='dm-state-actions'>
@@ -449,7 +450,7 @@ export default function ChatDetailPage() {
             <div className='dm-empty'>
               <Avatar user={otherUser} size='xl' />
               <p className='dm-empty-title'>This is the start of your chat with {otherUser.first_name}</p>
-              <p className='dm-empty-sub'>Say hello 👋</p>
+              <p className='dm-empty-sub'>Say hello!</p>
             </div>
           ) : (
             messages.map((msg, index) => {
@@ -493,7 +494,7 @@ export default function ChatDetailPage() {
               onClick={() => setPickerOpen((v) => !v)}
               aria-label='Insert emoji'
               aria-expanded={pickerOpen}>
-              😊
+              <Icon name='smile' />
             </button>
             {pickerOpen && (
               <div className='dm-emoji-grid' role='listbox' aria-label='Emoji'>
@@ -520,7 +521,7 @@ export default function ChatDetailPage() {
             disabled={!newMessage.trim() || sending}
             className='dm-send'
             aria-label='Send'>
-            {sending ? "…" : "➤"}
+            {sending ? "…" : <Icon name='send' />}
           </button>
         </form>
       </div>

@@ -197,7 +197,7 @@ Additional notifications: a follow request accepted or declined, a new follower 
 - Go (backend), plus a C compiler for the SQLite driver (on macOS: `xcode-select --install`; on Linux: `gcc`)
 - Node.js + npm (frontend)
 
-No `.env` files or extra configuration are required — the backend uses an embedded SQLite database and the frontend is pre-configured to talk to it.
+No extra configuration are required — the backend uses an embedded SQLite database and the frontend is pre-configured to talk to it.
 
 ### 1. Start the backend
 
@@ -239,7 +239,7 @@ To try the real-time features (chat, notifications) with two users at once, use 
 From the repo root:
 
 ```bash
-(cd backend && go test ./...)
+(cd backend && go test ./... -count=1 -v)
 (cd frontend && npm test)
 ```
 

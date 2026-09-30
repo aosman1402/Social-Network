@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { API_BASE, apiFetch } from "@/lib/api";
+import Icon from "@/components/Icon";
 
 // "Continue with GitHub" - a plain link to the backend, which redirects to
 // GitHub and back (see backend/pkg/handlers/oauth_github.go).
@@ -76,7 +77,7 @@ export default function GitHubLoginButton({
 
           <div className='auth-github-info' id='github-off-note'>
             <p className='auth-github-info-title'>
-              <span aria-hidden='true'>ℹ️</span> GitHub sign-in isn&apos;t connected on this server yet
+              <Icon name='info' /> GitHub sign-in isn&apos;t connected on this server yet
             </p>
             <p className='auth-github-info-text'>
               You can still log in or create an account with your email and password.

@@ -1,40 +1,40 @@
 /**
- * Map a notification's type to the emoji shown next to it. Shared between
+ * Map a notification's type to the icon (a components/Icon name) shown next to it. Shared between
  * the notifications page and the notification bell dropdown - previously
  * duplicated verbatim in both.
  * @param {string} type - Notification type (e.g. "follow_accepted")
- * @returns {string} A single emoji
+ * @returns {string} An Icon name
  */
 export const getNotificationIcon = (type) => {
   switch (type) {
     case "follow_request":
     case "follow_accepted":
     case "new_follower":
-      return "👤";
+      return "user";
     case "follow_declined":
-      return "🙅";
+      return "user-x";
     case "unfollow":
-      return "👋";
+      return "user-minus";
     case "group_invitation":
-      return "👥";
+      return "users";
     case "group_request":
-      return "📩";
+      return "mail";
     case "group_request_accepted":
     case "group_invitation_accepted":
-      return "✅";
+      return "check-circle";
     case "group_invitation_declined":
     case "group_request_declined":
-      return "🙅";
+      return "user-x";
     case "event_created":
-      return "📅";
+      return "calendar";
     case "comment":
-      return "💬";
+      return "message";
     case "profile_public":
-      return "🌍";
+      return "globe";
     case "profile_private":
-      return "🔒";
+      return "lock";
     default:
-      return "🔔";
+      return "bell";
   }
 };
 

@@ -8,6 +8,7 @@ import Avatar from "@/components/Avatar";
 import { formatDistanceToNow } from "@/lib/formatDistanceToNow";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useWebSocket } from "@/context/WebSocketContext";
+import Icon from "@/components/Icon";
 
 const fullName = (u) => `${u?.first_name || ""} ${u?.last_name || ""}`.trim();
 
@@ -120,18 +121,18 @@ export default function ChatPage() {
           Chat privately with people you follow or who follow you.
         </p>
         <div className='chats-hero-stats'>
-          <span className='chats-hero-chip'>💬 {chats.length} conversation{chats.length === 1 ? "" : "s"}</span>
+          <span className='chats-hero-chip'><Icon name='message' /> {chats.length} conversation{chats.length === 1 ? "" : "s"}</span>
           {unreadTotal > 0 && (
             <span className='chats-hero-chip chats-hero-chip--alert'>
               {unreadTotal} unread
             </span>
           )}
-          <span className='chats-hero-chip'>🟢 {onlineCount} online</span>
+          <span className='chats-hero-chip'><Icon name='dot' /> {onlineCount} online</span>
         </div>
       </header>
 
       <div className='chats-search'>
-        <span className='chats-search-icon' aria-hidden='true'>🔍</span>
+        <span className='chats-search-icon' aria-hidden='true'><Icon name='search' /></span>
         <input
           type='search'
           value={search}
@@ -216,7 +217,7 @@ export default function ChatPage() {
                         {online ? "Online now" : u.nickname ? `@${u.nickname}` : "Offline"}
                       </span>
                     </span>
-                    <span className='chats-contact-go' aria-hidden='true'>✎</span>
+                    <span className='chats-contact-go' aria-hidden='true'><Icon name='edit' /></span>
                   </button>
                 </li>
               ))}

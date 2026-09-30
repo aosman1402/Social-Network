@@ -1,16 +1,16 @@
 package handlers
 
 import (
-    "net/http"
-    "strings"
-    "unicode/utf8"
+	"net/http"
+	"strings"
+	"unicode/utf8"
 )
 
 // hasImageUpload reports whether an already-parsed multipart form carries
 // a file in its "image" field. Whether that file really is a JPG, PNG or
 // GIF is still decided by saveUploadedImage.
 func hasImageUpload(r *http.Request) bool {
-    return r.MultipartForm != nil && len(r.MultipartForm.File["image"]) > 0
+	return r.MultipartForm != nil && len(r.MultipartForm.File["image"]) > 0
 }
 
 // contentError applies the rule shared by posts and comments: they need
@@ -23,18 +23,18 @@ func hasImageUpload(r *http.Request) bool {
 // newlines and other control characters. Nothing is filtered or rewritten;
 // only text made up entirely of whitespace counts as empty.
 func contentError(content string, hasImage bool) string {
-    if !utf8.ValidString(content) {
-        return "Text must be valid UTF-8"
-    }
-    if strings.TrimSpace(content) == "" && !hasImage {
-        return "Write something or add an image (JPG, PNG or GIF)"
-    }
-    return ""
+	if !utf8.ValidString(content) {
+		return "Text must be valid UTF-8"
+	}
+	if strings.TrimSpace(content) == "" && !hasImage {
+		return "Write something or add an image (JPG, PNG or GIF)"
+	}
+	return ""
 }
 
 // isValidPrivacyLevel reports whether level is one of the three post
 // privacy options. Anything else would be stored as-is and then match none
 // of the visibility rules, leaving the post visible to its author only.
 func isValidPrivacyLevel(level string) bool {
-    return level == "public" || level == "almost_private" || level == "private"
+	return level == "public" || level == "almost_private" || level == "private"
 }

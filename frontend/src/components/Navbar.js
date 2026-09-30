@@ -10,6 +10,19 @@ import { apiFetch } from "@/lib/api";
 import NotificationBell from "@/components/NotificationBell";
 import Avatar from "@/components/Avatar";
 
+// Drawn as SVG rather than the 🎓 emoji - emoji depend on the OS having a
+// color emoji font, so on some systems/browsers the logo rendered blank.
+function GradCapIcon({ size = 22 }) {
+  return (
+    <svg width={size} height={size} viewBox='0 0 24 24' fill='currentColor' aria-hidden='true'>
+      <path d='M12 3 1 8.5 12 14l11-5.5z' />
+      <path d='M5.5 11.3V16c0 1.8 2.9 3.5 6.5 3.5s6.5-1.7 6.5-3.5v-4.7L12 14.6z' />
+      <path d='M21.25 9.4v5.1' stroke='currentColor' strokeWidth='1.5' strokeLinecap='round' />
+      <circle cx='21.25' cy='15.6' r='1.2' />
+    </svg>
+  );
+}
+
 function HomeIcon({ size = 18 }) {
   return (
     <svg width={size} height={size} viewBox='0 0 24 24' fill='none' stroke='currentColor' strokeWidth='2' strokeLinecap='round' strokeLinejoin='round' aria-hidden='true'>
@@ -204,7 +217,7 @@ export default function Navbar() {
       <nav className='navbar'>
         <div className='navbar-inner'>
           <Link href='/' className='navbar-brand' aria-label='Social Network for Studies - home'>
-            <span className='navbar-logo' aria-hidden='true'>🎓</span>
+            <span className='navbar-logo' aria-hidden='true'><GradCapIcon /></span>
             <span className='navbar-brand-text'>Social Network for Studies</span>
           </Link>
           <span className='navbar-loading'>Loading...</span>
@@ -219,7 +232,7 @@ export default function Navbar() {
     <nav className='navbar'>
       <div className='navbar-inner'>
         <Link href='/' className='navbar-brand' aria-label='Social Network for Studies - home'>
-          <span className='navbar-logo' aria-hidden='true'>🎓</span>
+          <span className='navbar-logo' aria-hidden='true'><GradCapIcon /></span>
           <span className='navbar-brand-text'>Social Network for Studies</span>
         </Link>
 

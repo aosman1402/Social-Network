@@ -8,6 +8,7 @@ import LoadingSpinner from "@/components/LoadingSpinner";
 import { useRequireAuth } from "@/hooks/useRequireAuth";
 import { useLivePosts } from "@/hooks/useLivePosts";
 import { apiFetch } from "@/lib/api";
+import Icon from "@/components/Icon";
 
 export default function HomePage() {
   return (
@@ -157,7 +158,7 @@ function HomeFeed() {
         ) : (
           <>
             {pinnedPosts.length > 0 && (
-              <h2 className='feed-section-title'>📌 Pinned</h2>
+              <h2 className='feed-section-title'><Icon name='pin' /> Pinned</h2>
             )}
             {pinnedPosts.map(renderPost)}
             {pinnedPosts.length > 0 && otherPosts.length > 0 && (
